@@ -1,0 +1,607 @@
+<div class="wrap loading" id="wrap">
+  <header class="top">
+    <div class="brand">
+      <img src="/app/icon.png" alt="">
+      <div class="grow">
+        <h1>Базис · мониторинг прода</h1>
+        <div class="sub" id="sub">etalon.iflat.io</div>
+      </div>
+      <button class="iconbtn" id="themeBtn" type="button" title="Светлая или тёмная тема" aria-label="Сменить тему">◐</button>
+    </div>
+    <div class="controls">
+      <div class="seg" id="ranges" role="group" aria-label="Период"></div>
+      <span class="refresh" id="refresh" title="Данные обновляются раз в минуту"><span class="dot" id="rdot"></span><span class="word">обновлено</span><span id="rtext">загружаю…</span></span>
+    </div>
+  </header>
+
+  <section class="status" id="status" aria-live="polite">
+    <div class="state"><span class="pulse"></span><span id="stTitle">Загружаю…</span></div>
+    <div class="meta" id="stMeta"></div>
+    <div class="checks" id="stChecks"></div>
+  </section>
+
+  <section class="kpis" id="kpis" aria-label="Главные цифры"></section>
+
+  <section class="card">
+    <div class="head"><h2>Время ответа</h2><span class="hint" id="latHint"></span></div>
+    <div class="legend" id="latLegend"></div>
+    <div class="chart" id="lat"></div>
+    <details class="tv"><summary>Показать таблицей</summary><div class="table-wrap" id="latTable"></div></details>
+  </section>
+
+  <section class="card">
+    <div class="head"><h2>Состояние по проверкам</h2><span class="hint" id="tlHint"></span></div>
+    <div class="legend" id="tlLegend"></div>
+    <div id="tl"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card days">
+      <div class="head"><h2>90 дней</h2><span class="hint">каждая полоска — сутки по Москве</span></div>
+      <div class="legend" id="daysLegend"></div>
+      <div class="chart" id="days"></div>
+      <div class="ends"><span id="daysFrom">90 дней назад</span><span>сегодня</span></div>
+      <div class="summary" id="daysSummary"></div>
+    </section>
+    <section class="card heat">
+      <div class="head"><h2>Когда падает</h2><span class="hint">минуты простоя за 90 дней по дням недели и часам, МСК</span></div>
+      <div class="chart" id="heat"></div>
+      <div class="legend" id="heatLegend" style="margin-top:8px"></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:14px">
+    <div class="head">
+      <h2>Журнал падений</h2><span class="hint" id="incHint"></span><span class="spacer"></span>
+      <div class="opts">
+        <label><input type="checkbox" id="optAll"> все 90 дней</label>
+        <label><input type="checkbox" id="optDrill"> учебные</label>
+        <button class="btn" id="csvBtn" type="button">⬇ CSV для Excel</button>
+      </div>
+    </div>
+    <div class="table-wrap" id="inc"></div>
+  </section>
+
+  <footer class="foot"><span id="foot"></span><span id="footR"></span></footer>
+</div>
+
+<div class="gate" id="gate" hidden>
+  <img src="/app/icon.png" alt="">
+  <h2 id="gateTitle">Открой дашборд из бота</h2>
+  <p id="gateText">Дашборд мониторинга виден команде разработки. Напиши боту /dash — он пришлёт кнопку и личную ссылку.</p>
+  <a class="cta" id="gateBot" href="https://t.me/" hidden>Открыть бота</a>
+</div>
+
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var NS = "http://www.w3.org/2000/svg";
+  var MSK = 3 * 3600;
+  var RANGES = [["1h","1 ч","последний час"],["24h","24 ч","24 часа"],["7d","7 дн","7 дней"],["30d","30 дн","30 дней"],["90d","90 дн","90 дней"]];
+  var RANGE_LABEL = {}; RANGES.forEach(function(r){ RANGE_LABEL[r[0]] = r[2]; });
+  var SER = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5)","var(--s6)"];
+  var ST = {
+    up:      {c:"var(--good)",     n:"работает",            i:"✅"},
+    slow:    {c:"var(--warning)",  n:"медленно",            i:"🐢"},
+    down:    {c:"var(--critical)", n:"не отвечал",          i:"❌"},
+    planned: {c:"var(--planned)",  n:"плановые работы",     i:"🔧"},
+    unk:     {c:"var(--nodata)",   n:"нет сети у монитора", i:"❔"},
+    none:    {c:"var(--nodata)",   n:"нет данных",          i:"▫️"}
+  };
+  var WD = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+  var MON = ["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
+
+  function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e){ return null; } return null; }
+  function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+  function z(n){ return (n < 10 ? "0" : "") + n; }
+  function msk(ts){ return new Date((ts + MSK) * 1000); }
+  function hhmm(ts){ var d = msk(ts); return z(d.getUTCHours()) + ":" + z(d.getUTCMinutes()); }
+  function ddmm(ts){ var d = msk(ts); return z(d.getUTCDate()) + "." + z(d.getUTCMonth() + 1); }
+  function dayMon(ts){ var d = msk(ts); return d.getUTCDate() + " " + MON[d.getUTCMonth()]; }
+  function wdOf(ts){ return (Math.floor((ts + MSK) / 86400) + 3) % 7; }
+  function everyText(d){ var n = (d.settings && d.settings.check_every) || 1; return n > 1 ? "раз в " + n + " мин, при сбое — каждую минуту" : "каждую минуту"; }
+  function plural(n, a, b, c){ n = Math.abs(Math.round(n)); var m10 = n % 10, m100 = n % 100; if (m10 === 1 && m100 !== 11) return a; if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return b; return c; }
+  function fmtDur(s){
+    s = Math.max(0, Math.round(Number(s) || 0));
+    if (s < 60) return s + " с";
+    var m = Math.round(s / 60); if (m < 60) return m + " мин";
+    var h = Math.floor(m / 60), mm = m % 60; if (h < 24) return h + " ч" + (mm ? " " + mm + " мин" : "");
+    var d = Math.floor(h / 24), hh = h % 24; return d + " д" + (hh ? " " + hh + " ч" : "");
+  }
+  function fmtSec(ms, axis){
+    if (ms == null) return "—";
+    var s = ms / 1000;
+    if (axis) return (s >= 10 ? String(Math.round(s)) : String(Math.round(s * 100) / 100)).replace(".", ",") + " с";
+    return (s < 10 ? s.toFixed(2) : s.toFixed(1)).replace(".", ",") + " с";
+  }
+  function fmtPct(up, down){
+    var n = up + down; if (!n) return "—";
+    if (!down) return "100 %";
+    return (Math.floor(up / n * 10000) / 100).toFixed(2).replace(".", ",") + " %";
+  }
+  function el(tag, attrs, parent){ var e = document.createElementNS(NS, tag); for (var k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+  function debounce(fn, ms){ var t; return function(){ clearTimeout(t); t = setTimeout(fn, ms); }; }
+
+  // ── Telegram Mini App ─────────────────────────────────────────────────────
+  var inTg = /tgWebAppData=/.test(location.hash) || !!window.TelegramWebviewProxy;
+  var tgInit = (location.hash.match(/tgWebAppData=([^&]+)/) || [])[1];
+  if (tgInit) { try { tgInit = decodeURIComponent(tgInit); } catch(e){} }
+  var TG = null;
+  if (inTg) {
+    var sc = document.createElement("script");
+    sc.src = "https://telegram.org/js/telegram-web-app.js"; sc.async = true;
+    sc.onload = function(){
+      TG = window.Telegram && window.Telegram.WebApp;
+      if (!TG) return;
+      try { TG.ready(); TG.expand(); } catch(e){}
+      if (!tgInit && TG.initData) { tgInit = TG.initData; headers = authHeaders(); load(); }
+      paintTgChrome();
+    };
+    document.head.appendChild(sc);
+  }
+  function paintTgChrome(){
+    if (!TG) return;
+    var bg = getComputedStyle(document.documentElement).getPropertyValue("--page").trim();
+    try { TG.setHeaderColor(bg); TG.setBackgroundColor(bg); } catch(e){}
+  }
+
+  // ── доступ ────────────────────────────────────────────────────────────────
+  function authHeaders(){
+    var h = {};
+    if (tgInit) h["x-tg-init-data"] = tgInit;
+    var m = location.hash.match(/(?:^#|&)k=([^&]+)/), k = null;
+    if (m) { k = decodeURIComponent(m[1]); store("mon:k", k); }
+    if (!k) k = store("mon:k");
+    if (k) h["x-dash-key"] = k;
+    return h;
+  }
+  var headers = authHeaders();
+
+  function showGate(title, text, bot){
+    $("wrap").hidden = true; $("gate").hidden = false;
+    if (title) $("gateTitle").textContent = title;
+    if (text) $("gateText").textContent = text;
+    if (bot) { var a = $("gateBot"); a.href = "https://t.me/" + bot; a.hidden = false; }
+  }
+
+  // ── тема ──────────────────────────────────────────────────────────────────
+  $("themeBtn").addEventListener("click", function(){
+    var cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    var next = cur === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    store("mon:theme", next);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", next === "light" ? "#F3F5F8" : "#0E131B");
+    paintTgChrome();
+  });
+
+  // ── период ────────────────────────────────────────────────────────────────
+  var range = RANGE_LABEL[store("mon:range")] ? store("mon:range") : "24h";
+  function paintRanges(){
+    var box = $("ranges"); box.innerHTML = "";
+    RANGES.forEach(function(r){
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = r[1]; b.title = r[2];
+      b.setAttribute("aria-pressed", r[0] === range ? "true" : "false");
+      b.addEventListener("click", function(){ if (range === r[0]) return; range = r[0]; store("mon:range", range); paintRanges(); load(); });
+      box.appendChild(b);
+    });
+  }
+  paintRanges();
+
+  // ── подсказка ─────────────────────────────────────────────────────────────
+  var tip = $("tip");
+  function showTip(html, ev){
+    tip.innerHTML = html; tip.classList.add("on");
+    var pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+    var x = ev.clientX + pad, y = ev.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+    tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+  }
+  function hideTip(){ tip.classList.remove("on"); }
+  function tipRow(name, value, color){ return '<div class="r"><span class="n">' + (color ? '<span class="k" style="background:' + color + '"></span>' : "") + esc(name) + "</span><b>" + esc(value) + "</b></div>"; }
+
+  // ── данные ────────────────────────────────────────────────────────────────
+  var DATA = null, lastLoad = 0, timer = null;
+  function load(){
+    $("wrap").classList.add("loading");
+    fetch("/api/data?range=" + encodeURIComponent(range), {headers: headers, cache: "no-store"}).then(function(r){
+      if (r.status === 401 || r.status === 403) {
+        if (tgInit) showGate("Нет доступа", "Дашборд виден команде разработки Базиса. Открой бота и нажми Start — если ты в чате разработчиков, доступ появится сразу.");
+        else if (headers["x-dash-key"]) showGate("Ссылка устарела", "Напиши боту /dash — он пришлёт новую ссылку.");
+        else showGate();
+        return null;
+      }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      if (!d) return;
+      DATA = d; lastLoad = Date.now();
+      $("wrap").hidden = false; $("gate").hidden = true;
+      render(d);
+      $("wrap").classList.remove("loading");
+    }).catch(function(e){
+      $("rtext").textContent = "не обновилось (" + e.message + ")";
+      $("rdot").classList.add("stale");
+      $("wrap").classList.remove("loading");
+    }).then(schedule, schedule);
+  }
+  function schedule(){
+    clearTimeout(timer);
+    timer = setTimeout(function(){ if (document.visibilityState === "visible") load(); else schedule(); }, 60000);
+  }
+  document.addEventListener("visibilitychange", function(){ if (document.visibilityState === "visible" && Date.now() - lastLoad > 55000) load(); });
+  window.addEventListener("resize", debounce(function(){ if (DATA) renderCharts(DATA); }, 150));
+
+  function render(d){
+    $("sub").textContent = d.service.host + " · проверка " + everyText(d) + (d.chat ? " · тревоги в «" + d.chat + "»" + (d.topic ? ", тема «" + d.topic + "»" : "") : "");
+    var g = msk(d.now);
+    $("rtext").textContent = z(g.getUTCHours()) + ":" + z(g.getUTCMinutes()) + ":" + z(g.getUTCSeconds()) + " МСК";
+    $("rdot").classList.toggle("stale", d.status.age_s != null && d.status.age_s > 180);
+    renderStatus(d); renderKpis(d); renderCharts(d); renderIncidents(d); renderFoot(d);
+  }
+  function renderCharts(d){ renderLatency(d); renderTimeline(d); renderDays(d); renderHeat(d); }
+
+  // ── статус сейчас ─────────────────────────────────────────────────────────
+  function stateOfCheck(c){ if (!c || c.st == null) return "none"; if (c.st === 1) return "up"; if (c.st === 2) return "planned"; if (c.st === -1) return "unk"; return "down"; }
+  function renderStatus(d){
+    var s = d.status, box = $("status"), cls = "", title, meta = [];
+    if (s.incident && s.incident.kind === "down") {
+      cls = "down"; title = d.service.name + " недоступен";
+      meta.push("с " + hhmm(s.incident.start) + " МСК · уже " + fmtDur(d.now - s.incident.start));
+      meta.push(s.incident.acked ? "в работе: " + s.incident.acked : "тревогу пока никто не взял");
+    } else if (s.mute_until) {
+      cls = "planned"; title = "Плановые работы";
+      meta.push("до " + hhmm(s.mute_until) + " МСК, тревоги на паузе" + (s.mute_by ? " · пауза: " + s.mute_by : ""));
+    } else if (s.svc === -1) {
+      cls = "unknown"; title = "У монитора нет сети"; meta.push("статус Базиса сейчас неизвестен");
+    } else if (s.svc === 0) {
+      cls = "down"; title = d.service.name + " не отвечает"; meta.push("перепроверяю — тревога через " + d.settings.fail_after + " " + plural(d.settings.fail_after, "минуту", "минуты", "минут") + " подряд");
+    } else if (s.svc == null) {
+      cls = "unknown"; title = "Ждём первую проверку";
+    } else {
+      title = d.service.name + " работает";
+    }
+    if (s.drill) meta.push("🧪 идут учения");
+    if (s.age_s != null) meta.push(s.age_s > 180 ? "⚠️ монитор молчит " + fmtDur(s.age_s) + " — проверь Cron" : "проверено " + (s.age_s < 60 ? s.age_s + " с" : fmtDur(s.age_s)) + " назад");
+    box.className = "status" + (cls ? " " + cls : "");
+    $("stTitle").textContent = title;
+    $("stMeta").textContent = meta.join(" · ");
+    var ch = $("stChecks"); ch.innerHTML = "";
+    s.targets.forEach(function(t){
+      var st = stateOfCheck(t);
+      var p = document.createElement("span"); p.className = "pill";
+      var txt = st === "up" ? fmtSec(t.ms) : st === "none" ? "нет данных" : (t.err || ST[st].n);
+      p.innerHTML = '<span class="ic">' + ST[st].i + "</span><b></b><span></span>";
+      p.children[1].textContent = t.name; p.children[2].textContent = txt;
+      p.title = st === "up" ? ("HTTP " + t.code + (t.code === 401 ? " — без входа так и должно быть: API живой" : "")) : (t.err || "");
+      ch.appendChild(p);
+    });
+  }
+
+  // ── плитки ────────────────────────────────────────────────────────────────
+  function renderKpis(d){
+    var t = d.tiles, k = $("kpis"), rl = RANGE_LABEL[d.range];
+    var pct = fmtPct(t.up, t.down);
+    var html = "";
+    var noData = t.up + t.down === 0;
+    html += '<div class="tile hero"><div class="lbl">Доступность за ' + esc(rl) + '</div><div class="val">' + esc(pct) + "</div>";
+    html += '<div class="chip ' + (noData ? "none" : t.down ? "bad" : "") + '"><i></i>' + esc(noData ? "нет данных за период" : t.down ? "простой " + fmtDur(t.downtime_s) : "без простоя") + "</div>";
+    var sub = [];
+    if (t.planned) sub.push("плановые работы " + fmtDur(t.planned * 60) + " — не считаются");
+    if (t.unk) sub.push("без сети у монитора " + fmtDur(t.unk * 60));
+    if (sub.length) html += '<div class="sub">' + esc(sub.join(" · ")) + "</div>";
+    html += "</div>";
+    html += '<div class="tile t-inc"><div class="lbl">Падения</div><div class="val">' + t.incidents + "</div><div class=\"sub\">" + esc(t.incidents ? (t.mttr_s != null ? "восстановление в среднем " + fmtDur(t.mttr_s) : "одно ещё идёт") : "не было 👌") + "</div></div>";
+    html += '<div class="tile t-mtta"><div class="lbl">Реакция на тревогу</div><div class="val">' + esc(t.mtta_s != null ? fmtDur(t.mtta_s) : "—") + '</div><div class="sub">от тревоги до «🙋 Беру»</div></div>';
+    var rows = "";
+    d.targets.forEach(function(tg, i){
+      var l = t.latency[tg.id];
+      rows += '<div><span><span class="key" style="background:' + SER[i % SER.length] + '"></span>' + esc(tg.name) + "</span><span><b>" + esc(l ? fmtSec(l.p50) : "—") + "</b> · p95 " + esc(l ? fmtSec(l.p95) : "—") + "</span></div>";
+    });
+    html += '<div class="tile t-lat"><div class="lbl">Время ответа · медиана и p95' + (d.upper === "p95" ? " ≈" : "") + '</div><div class="rows">' + rows + "</div></div>";
+    html += '<div class="tile t-blips"><div class="lbl">Сбои с первой попытки</div><div class="val">' + t.blips + '</div><div class="sub">прошли со второй — тревогу не поднимали</div></div>';
+    k.innerHTML = html;
+  }
+
+  // ── общие для графиков ────────────────────────────────────────────────────
+  function niceTicks(max, count){
+    if (!(max > 0)) return [0, 1];
+    var raw = max / count, mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+    var step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag;
+    var out = []; for (var v = 0; v <= max + step * 0.999; v += step) out.push(Math.round(v * 1000) / 1000);
+    if (out.length < 2) out.push(step);
+    return out;
+  }
+  function xTicks(d){
+    var step = {"1h": 600, "24h": 3 * 3600, "7d": 86400, "30d": 5 * 86400, "90d": 15 * 86400}[d.range];
+    var first = Math.ceil((d.from + MSK) / step) * step - MSK, out = [];
+    for (var t = first; t <= d.to; t += step) out.push(t);
+    return out;
+  }
+  function xLabel(d, ts){ return (d.range === "1h" || d.range === "24h") ? hhmm(ts) : dayMon(ts); }
+  function bucketLabel(d, b){
+    var e = b + d.bucket;
+    if (d.bucket < 86400 && (d.range === "1h" || d.range === "24h")) return (d.bucket === 60 ? hhmm(b) : hhmm(b) + "–" + hhmm(e)) + " МСК";
+    return dayMon(b) + ", " + hhmm(b) + "–" + hhmm(e) + " МСК";
+  }
+  function bucketState(r, slow){
+    if (!r) return "none";
+    if (r[2] > 0) return "down";
+    if (r[3] > 0) return "planned";
+    if (r[1] === 0 && r[4] > 0) return "unk";
+    if (r[1] > 0 && r[5] != null && r[5] > slow) return "slow";
+    if (r[1] > 0) return "up";
+    return "none";
+  }
+  function byBucket(rows){ var m = {}; (rows || []).forEach(function(r){ m[r[0]] = r; }); return m; }
+  function stateText(r){
+    if (!r) return "нет данных";
+    var parts = [];
+    if (r[1]) parts.push("работал " + r[1] + " мин");
+    if (r[2]) parts.push("не отвечал " + r[2] + " мин");
+    if (r[3]) parts.push("плановые " + r[3] + " мин");
+    if (r[4]) parts.push("без сети " + r[4] + " мин");
+    return parts.join(", ") || "нет данных";
+  }
+
+  // ── время ответа ──────────────────────────────────────────────────────────
+  function renderLatency(d){
+    var box = $("lat"); box.innerHTML = "";
+    var lg = $("latLegend"); lg.innerHTML = "";
+    $("latHint").textContent = "средняя линия и разброс до " + (d.upper === "p95" ? "p95 за час" : "максимума") + " · красным — минуты, когда Базис не отвечал";
+    var targets = d.targets;
+    if (targets.length > 1) targets.forEach(function(t, i){ var s = document.createElement("span"); s.innerHTML = '<span class="key" style="background:' + SER[i % SER.length] + '"></span>'; s.appendChild(document.createTextNode(t.name)); lg.appendChild(s); });
+    var W = Math.max(280, box.clientWidth || 800), H = W < 560 ? 210 : 270;
+    var m = {l: 48, r: 14, t: 12, b: 26};
+    var pw = W - m.l - m.r, ph = H - m.t - m.b;
+    var ymax = 0;
+    targets.forEach(function(t){ (d.series[t.id] || []).forEach(function(r){ var v = r[6] != null ? r[6] : r[5]; if (v != null && v > ymax) ymax = v; }); });
+    var svc = d.series._ || [];
+    if (!ymax && !svc.length) { box.innerHTML = '<div class="empty">Пока нет проверок за этот период</div>'; $("latTable").innerHTML = ""; return; }
+    var avgMax = 0, uppers = [];
+    targets.forEach(function(t){ (d.series[t.id] || []).forEach(function(r){ if (r[5] != null && r[5] > avgMax) avgMax = r[5]; var v = r[6] != null ? r[6] : r[5]; if (v != null) uppers.push(v); }); });
+    uppers.sort(function(a, b){ return a - b; });
+    var q98 = uppers.length ? uppers[Math.min(uppers.length - 1, Math.floor(uppers.length * 0.98))] : 0;
+    var scaleMax = Math.max(avgMax * 1.25, q98 * 1.1) || ymax || 1000;
+    var ticks = niceTicks(scaleMax, 4), top = ticks[ticks.length - 1];
+    var span = Math.max(1, d.to - d.from);
+    function x(ts){ return m.l + (ts - d.from) / span * pw; }
+    function y(ms){ return m.t + ph - Math.min(ms, top) / top * ph; }
+    var svg = el("svg", {viewBox: "0 0 " + W + " " + H, height: H, role: "img", "aria-label": "Время ответа по проверкам за " + RANGE_LABEL[d.range]}, box);
+    var g = el("g", {"class": "grid"}, svg);
+    ticks.forEach(function(v){ el("line", {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v)}, g); var tx = el("text", {x: m.l - 8, y: y(v) + 4, "text-anchor": "end"}, svg); tx.textContent = fmtSec(v, true); });
+    svc.forEach(function(r){
+      if (!(r[2] > 0 || r[3] > 0)) return;
+      el("rect", {x: x(r[0]), y: m.t, width: Math.max(1.5, x(r[0] + d.bucket) - x(r[0])), height: ph, fill: r[2] > 0 ? "var(--crit-wash)" : "var(--plan-wash)"}, svg);
+    });
+    if (d.slow_ms < top) {
+      el("line", {x1: m.l, x2: W - m.r, y1: y(d.slow_ms), y2: y(d.slow_ms), stroke: "var(--warning)", "stroke-width": 1, opacity: 0.7}, svg);
+      var st = el("text", {x: W - m.r, y: y(d.slow_ms) - 4, "text-anchor": "end"}, svg); st.textContent = "медленно — от " + fmtSec(d.slow_ms, true);
+    }
+    var ax = el("g", {"class": "axis"}, svg);
+    el("line", {x1: m.l, x2: W - m.r, y1: m.t + ph, y2: m.t + ph}, ax);
+    xTicks(d).forEach(function(ts){ var tx = el("text", {x: x(ts), y: H - 6, "text-anchor": "middle"}, svg); tx.textContent = xLabel(d, ts); });
+    var ends = [];
+    targets.forEach(function(t, i){
+      var rows = (d.series[t.id] || []).filter(function(r){ return r[5] != null; });
+      var segs = [], cur = [];
+      var step = Math.max(d.bucket, ((d.settings && d.settings.check_every) || 1) * 60);
+      rows.forEach(function(r, j){ if (j && r[0] - rows[j - 1][0] > step * 1.5) { segs.push(cur); cur = []; } cur.push(r); });
+      if (cur.length) segs.push(cur);
+      var color = SER[i % SER.length];
+      segs.forEach(function(sg){
+        var mid = function(r){ return x(r[0] + d.bucket / 2); };
+        if (sg.length === 1) { el("circle", {cx: mid(sg[0]), cy: y(sg[0][5]), r: 3, fill: color}, svg); return; }
+        var up = sg.map(function(r){ return mid(r).toFixed(1) + "," + y(r[6] != null ? r[6] : r[5]).toFixed(1); });
+        var lo = sg.map(function(r){ return mid(r).toFixed(1) + "," + y(r[5]).toFixed(1); }).reverse();
+        el("polygon", {points: up.concat(lo).join(" "), fill: color, opacity: 0.1}, svg);
+        el("polyline", {points: sg.map(function(r){ return mid(r).toFixed(1) + "," + y(r[5]).toFixed(1); }).join(" "), fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}, svg);
+      });
+      var last = rows[rows.length - 1];
+      if (last) ends.push({name: t.name, x: x(last[0] + d.bucket / 2), y: y(last[5]), color: color});
+    });
+    // подписи на концах линий — только если не налезают друг на друга
+    if (ends.length && ends.length <= 4) {
+      var sorted = ends.slice().sort(function(a, b){ return a.y - b.y; }), clash = false;
+      for (var i = 1; i < sorted.length; i++) if (sorted[i].y - sorted[i - 1].y < 14) clash = true;
+      ends.forEach(function(e){ el("circle", {cx: e.x, cy: e.y, r: 4, fill: e.color, stroke: "var(--surface)", "stroke-width": 2}, svg); });
+      if (!clash && pw > 360) ends.forEach(function(e){ var tx = el("text", {x: Math.min(e.x - 8, W - m.r - 4), y: e.y - 9, "text-anchor": "end", "class": "lbl-end"}, svg); tx.textContent = e.name; });
+    }
+    // перекрестье
+    var maps = targets.map(function(t){ return byBucket(d.series[t.id]); }), smap = byBucket(svc);
+    var xh = el("line", {"class": "xh", y1: m.t, y2: m.t + ph, x1: -10, x2: -10, opacity: 0}, svg);
+    var hit = el("rect", {x: m.l, y: m.t, width: pw, height: ph, fill: "transparent", tabindex: 0}, svg);
+    function at(clientX){
+      var rect = svg.getBoundingClientRect(), px = (clientX - rect.left) * (W / rect.width);
+      var ts = d.from + (px - m.l) / pw * span;
+      return Math.floor((ts + MSK) / d.bucket) * d.bucket - MSK;
+    }
+    function move(ev){
+      var b = at(ev.clientX); if (b < d.from || b >= d.to) { out(); return; }
+      var cx = x(b + d.bucket / 2); xh.setAttribute("x1", cx); xh.setAttribute("x2", cx); xh.setAttribute("opacity", 1);
+      var html = '<div class="t">' + esc(bucketLabel(d, b)) + "</div>";
+      targets.forEach(function(t, i){
+        var r = maps[i][b];
+        var v = r && r[5] != null ? fmtSec(r[5]) + (r[6] != null && r[6] !== r[5] ? " · " + (d.upper === "p95" ? "p95 " : "макс ") + fmtSec(r[6]) : "") : (r && r[2] ? "не отвечал" : "—");
+        html += tipRow(t.name, v, SER[i % SER.length]);
+      });
+      var s = smap[b];
+      html += '<div class="r"><span class="n">' + ST[bucketState(s, 1e12)].i + " " + esc(stateText(s)) + "</span></div>";
+      showTip(html, ev);
+    }
+    function out(){ xh.setAttribute("opacity", 0); hideTip(); }
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerdown", move);
+    hit.addEventListener("pointerleave", out);
+    // таблица
+    var th = "<table><thead><tr><th>Время (МСК)</th>" + targets.map(function(t){ return "<th>" + esc(t.name) + ", среднее</th>"; }).join("") + "<th>Состояние</th></tr></thead><tbody>";
+    var bs = Object.keys(smap).map(Number).sort(function(a, b){ return b - a; }).slice(0, 300);
+    bs.forEach(function(b){
+      th += '<tr><td class="when">' + esc(bucketLabel(d, b)) + "</td>" + targets.map(function(t, i){ var r = maps[i][b]; return '<td class="num">' + esc(r && r[5] != null ? fmtSec(r[5]) : "—") + "</td>"; }).join("") + "<td>" + esc(stateText(smap[b])) + "</td></tr>";
+    });
+    $("latTable").innerHTML = th + "</tbody></table>";
+  }
+
+  // ── состояние по проверкам ────────────────────────────────────────────────
+  function renderTimeline(d){
+    var box = $("tl"); box.innerHTML = "";
+    var nb = Math.round((d.to - d.from) / d.bucket);
+    $("tlHint").textContent = "шаг " + fmtDur(d.bucket) + " · наведи, чтобы увидеть подробности";
+    var lg = $("tlLegend"); lg.innerHTML = "";
+    ["up", "slow", "down", "planned", "none"].forEach(function(k){ var s = document.createElement("span"); s.innerHTML = '<span class="sw" style="background:' + ST[k].c + '"></span>'; s.appendChild(document.createTextNode(ST[k].n)); lg.appendChild(s); });
+    var rows = d.targets.map(function(t){ return {id: t.id, name: t.name}; }).concat([{id: "_", name: "Итог"}]);
+    rows.forEach(function(row){
+      var wrap = document.createElement("div"); wrap.className = "tl-row";
+      var nm = document.createElement("div"); nm.className = "name"; nm.textContent = row.name; wrap.appendChild(nm);
+      var holder = document.createElement("div"); wrap.appendChild(holder); box.appendChild(wrap);
+      var W = Math.max(200, holder.clientWidth || 600), H = row.id === "_" ? 22 : 16;
+      var svg = el("svg", {viewBox: "0 0 " + W + " " + H, height: H, role: "img", "aria-label": "Состояние: " + row.name}, holder);
+      el("rect", {x: 0, y: 0, width: W, height: H, rx: 4, fill: "var(--nodata)"}, svg);
+      var map = byBucket(d.series[row.id]);
+      var segs = [], cur = null;
+      for (var i = 0; i < nb; i++) {
+        var b = d.from + i * d.bucket, s = bucketState(map[b], d.slow_ms);
+        if (cur && cur.s === s) cur.n++; else { cur = {s: s, i: i, n: 1}; segs.push(cur); }
+      }
+      segs.forEach(function(sg){
+        if (sg.s === "none" || sg.s === "unk") return;
+        var x0 = sg.i / nb * W, x1 = (sg.i + sg.n) / nb * W;
+        el("rect", {x: x0.toFixed(1), y: 0, width: Math.max(1.5, x1 - x0 - (sg.i + sg.n < nb ? 1 : 0)).toFixed(1), height: H, fill: ST[sg.s].c, rx: 2}, svg);
+      });
+      var hit = el("rect", {x: 0, y: 0, width: W, height: H, fill: "transparent"}, svg);
+      function move(ev){
+        var rect = svg.getBoundingClientRect(), i = Math.floor((ev.clientX - rect.left) / rect.width * nb);
+        if (i < 0 || i >= nb) return hideTip();
+        var b = d.from + i * d.bucket, r = map[b], s = bucketState(r, d.slow_ms);
+        var html = '<div class="t">' + esc(row.name) + " · " + esc(bucketLabel(d, b)) + "</div>" + tipRow(ST[s].i + " " + ST[s].n, r && r[5] != null ? fmtSec(r[5]) : "");
+        if (r) html += '<div class="r"><span class="n">' + esc(stateText(r)) + "</span></div>";
+        showTip(html, ev);
+      }
+      hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move); hit.addEventListener("pointerleave", hideTip);
+    });
+    var axis = document.createElement("div"); axis.className = "tl-axis";
+    axis.innerHTML = "<span></span><span class=\"ticks\"><span>" + esc(xLabel(d, d.from)) + "</span><span>" + esc(xLabel(d, d.from + (d.to - d.from) / 2)) + "</span><span>" + esc(d.range === "1h" || d.range === "24h" ? "сейчас" : "сегодня") + "</span></span>";
+    box.appendChild(axis);
+  }
+
+  // ── 90 дней ───────────────────────────────────────────────────────────────
+  function dayState(r){
+    if (!r || r[1] + r[2] + r[3] + r[4] === 0) return {k: "none", c: "var(--nodata)", n: "нет данных"};
+    if (!r[2]) return {k: "ok", c: "var(--good)", n: "без падений"};
+    if (r[2] <= 30) return {k: "w", c: "var(--warning)", n: "простой до 30 мин"};
+    if (r[2] <= 120) return {k: "s", c: "var(--serious)", n: "простой до 2 ч"};
+    return {k: "c", c: "var(--critical)", n: "простой больше 2 ч"};
+  }
+  function renderDays(d){
+    var box = $("days"); box.innerHTML = "";
+    var lg = $("daysLegend"); lg.innerHTML = "";
+    [["var(--good)","без падений"],["var(--warning)","до 30 мин"],["var(--serious)","до 2 ч"],["var(--critical)","больше 2 ч"],["var(--nodata)","нет данных"]].forEach(function(p){ var s = document.createElement("span"); s.innerHTML = '<span class="sw" style="background:' + p[0] + '"></span>'; s.appendChild(document.createTextNode(p[1])); lg.appendChild(s); });
+    var today = Math.floor((d.now + MSK) / 86400), first = today - 89;
+    var map = {}; (d.days || []).forEach(function(r){ map[r[0]] = r; });
+    var W = Math.max(240, box.clientWidth || 500), H = W > 500 ? 76 : 44, n = 90;
+    var gap = W / n >= 5 ? 2 : 1, bw = (W - gap * (n - 1)) / n;
+    var svg = el("svg", {viewBox: "0 0 " + W + " " + H, height: H, role: "img", "aria-label": "Доступность по дням за 90 дней"}, box);
+    var tot = [0, 0, 0, 0, 0];
+    for (var i = 0; i < n; i++) {
+      var day = first + i, r = map[day], s = dayState(r);
+      if (r) for (var j = 1; j <= 5; j++) tot[j - 1] += r[j] || 0;
+      var rect = el("rect", {x: (i * (bw + gap)).toFixed(1), y: 0, width: Math.max(1, bw).toFixed(1), height: H, rx: Math.min(3, bw / 2), fill: s.c}, svg);
+      (function(day, r, s){
+        function mv(ev){
+          var ts = day * 86400 - MSK;
+          var html = '<div class="t">' + esc(WD[wdOf(ts)] + ", " + dayMon(ts)) + "</div>";
+          html += tipRow(s.n, r && r[1] + r[2] ? fmtPct(r[1], r[2]) : "—", s.c);
+          if (r && r[2]) html += tipRow("простой", fmtDur(r[2] * 60));
+          if (r && r[5]) html += tipRow("падений", String(r[5]));
+          if (r && r[3]) html += tipRow("плановые работы", fmtDur(r[3] * 60));
+          showTip(html, ev);
+        }
+        rect.addEventListener("pointermove", mv); rect.addEventListener("pointerdown", mv); rect.addEventListener("pointerleave", hideTip);
+      })(day, r, s);
+    }
+    $("daysFrom").textContent = dayMon(first * 86400 - MSK);
+    var observed = (d.days || []).length;
+    $("daysSummary").textContent = observed
+      ? "За " + observed + " " + plural(observed, "день", "дня", "дней") + " наблюдений: доступность " + fmtPct(tot[0], tot[1]) + " · " + (tot[4] ? tot[4] + " " + plural(tot[4], "падение", "падения", "падений") + ", простой " + fmtDur(tot[1] * 60) : "падений не было 👌")
+      : "Данных пока нет — монитор только запустился.";
+  }
+
+  // ── когда падает ──────────────────────────────────────────────────────────
+  function heatColor(v){ if (!v) return "var(--nodata)"; if (v <= 5) return "var(--h1)"; if (v <= 15) return "var(--h2)"; if (v <= 60) return "var(--h3)"; if (v <= 180) return "var(--h4)"; return "var(--h5)"; }
+  function renderHeat(d){
+    var box = $("heat"); box.innerHTML = "";
+    var lg = $("heatLegend"); lg.innerHTML = "";
+    [["var(--nodata)","0"],["var(--h1)","1–5 мин"],["var(--h2)","6–15"],["var(--h3)","16–60"],["var(--h4)","1–3 ч"],["var(--h5)","больше 3 ч"]].forEach(function(p){ var s = document.createElement("span"); s.innerHTML = '<span class="sw" style="background:' + p[0] + '"></span>'; s.appendChild(document.createTextNode(p[1])); lg.appendChild(s); });
+    var cell = {}; var total = 0; (d.heat || []).forEach(function(r){ cell[r[0] + ":" + r[1]] = r; total += r[2]; });
+    var W = Math.max(260, box.clientWidth || 500), lw = 24, th = 14;
+    var cw = (W - lw) / 24, ch = Math.min(20, Math.max(12, cw * 0.9)), H = th + ch * 7;
+    var svg = el("svg", {viewBox: "0 0 " + W + " " + H, height: H, role: "img", "aria-label": "Простой по дням недели и часам"}, box);
+    for (var h = 0; h < 24; h += 3) { var tx = el("text", {x: lw + h * cw + 1, y: 10}, svg); tx.textContent = z(h); }
+    for (var w = 0; w < 7; w++) {
+      var lt = el("text", {x: 0, y: th + w * ch + ch / 2 + 4}, svg); lt.textContent = WD[w];
+      for (var hh = 0; hh < 24; hh++) {
+        var r = cell[w + ":" + hh], v = r ? r[2] : 0;
+        var rc = el("rect", {x: (lw + hh * cw + 1).toFixed(1), y: (th + w * ch + 1).toFixed(1), width: Math.max(1, cw - 2).toFixed(1), height: Math.max(1, ch - 2).toFixed(1), rx: 2, fill: heatColor(v)}, svg);
+        (function(w, hh, r){
+          function mv(ev){
+            var html = '<div class="t">' + esc(WD[w] + ", " + z(hh) + ":00–" + z((hh + 1) % 24) + ":00 МСК") + "</div>";
+            html += tipRow("простой за 90 дней", r && r[2] ? fmtDur(r[2] * 60) : "не было");
+            if (r && r[3]) html += tipRow("наблюдали", fmtDur(r[3] * 60));
+            showTip(html, ev);
+          }
+          rc.addEventListener("pointermove", mv); rc.addEventListener("pointerdown", mv); rc.addEventListener("pointerleave", hideTip);
+        })(w, hh, r);
+      }
+    }
+    if (!total) {
+      var e = document.createElement("div"); e.className = "empty"; e.style.padding = "8px 0 0";
+      e.textContent = (d.heat || []).length ? "За 90 дней Базис ни разу не падал 👌" : "Карта заполнится, когда накопится хотя бы час наблюдений";
+      box.appendChild(e);
+    }
+  }
+
+  // ── журнал ────────────────────────────────────────────────────────────────
+  $("optAll").addEventListener("change", function(){ if (DATA) renderIncidents(DATA); });
+  $("optDrill").addEventListener("change", function(){ if (DATA) renderIncidents(DATA); });
+  function renderIncidents(d){
+    var all = $("optAll").checked, drills = $("optDrill").checked;
+    var list = (d.incidents || []).filter(function(i){ return (drills || i.kind !== "drill") && (all || !i.end || i.end >= d.from || i.start >= d.from); });
+    $("incHint").textContent = all ? "за 90 дней" : "за " + RANGE_LABEL[d.range];
+    var box = $("inc");
+    if (!list.length) { box.innerHTML = '<div class="empty">' + (all ? "За 90 дней падений не было 👌" : "За этот период падений не было 👌") + "</div>"; return; }
+    var html = '<table class="inc"><thead><tr><th>Когда</th><th>Сколько</th><th>Что не отвечало</th><th>Причина</th><th>Кто взял</th><th>Реакция</th></tr></thead><tbody>';
+    list.forEach(function(i){
+      var badge = i.kind === "planned" ? '<span class="badge planned">🔧 плановые</span>' : i.kind === "drill" ? '<span class="badge drill">🧪 учебная</span>' : (!i.end ? '<span class="badge open">идёт сейчас</span>' : '<span class="badge down">🔴 падение</span>');
+      html += '<tr><td class="when" data-l="' + esc(ddmm(i.start) + " " + hhmm(i.start)) + '">' + badge + '<span class="d-when"><br>' + esc(ddmm(i.start) + " " + hhmm(i.start)) + "</span></td>";
+      html += '<td class="dur" data-l="Сколько"><span><b>' + esc(fmtDur(i.dur)) + "</b>" + (i.end ? '<span class="d-end"><br><span style="color:var(--ink-3)"> до ' + esc(hhmm(i.end)) + "</span></span>" : "") + "</span></td>";
+      html += '<td data-l="Что">' + esc((i.targets || []).join(", ") || "—") + "</td>";
+      html += '<td class="cause" data-l="Причина">' + esc(i.cause || "—") + (i.pm ? '<div class="pm">📝 ' + esc(i.pm) + (i.pm_by ? " — " + esc(i.pm_by) : "") + "</div>" : "") + "</td>";
+      html += '<td data-l="Кто взял"><span>' + esc(i.kind === "planned" ? "—" : (i.acked || "никто")) + (i.reminders ? '<br><span style="color:var(--ink-3)">напоминаний: ' + i.reminders + "</span>" : "") + "</span></td>";
+      html += '<td class="react" data-l="Реакция">' + esc(i.ack_s != null ? fmtDur(i.ack_s) : "—") + "</td></tr>";
+    });
+    box.innerHTML = html + "</tbody></table>";
+  }
+  $("csvBtn").addEventListener("click", function(){
+    var btn = this; btn.disabled = true; btn.textContent = "Готовлю…";
+    fetch("/api/incidents.csv", {headers: headers, cache: "no-store"}).then(function(r){ if (!r.ok) throw new Error("HTTP " + r.status); return r.blob(); }).then(function(b){
+      var a = document.createElement("a"), u = URL.createObjectURL(b);
+      var d = new Date(); a.href = u; a.download = "bazis-incidents-" + d.getFullYear() + "-" + z(d.getMonth() + 1) + "-" + z(d.getDate()) + ".csv";
+      document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(u); a.remove(); }, 1000);
+    }).catch(function(e){ alertText("Не получилось скачать: " + e.message + ". Открой дашборд в браузере по ссылке из /dash."); }).then(function(){ btn.disabled = false; btn.textContent = "⬇ CSV для Excel"; });
+  });
+  function alertText(t){ $("incHint").textContent = t; }
+
+  function renderFoot(d){
+    $("foot").textContent = d.service.name + " · мониторинг v" + d.version + " · проверка " + everyText(d) + ", тревога после " + d.settings.fail_after + " " + plural(d.settings.fail_after, "неудачной минуты", "неудачных минут подряд", "неудачных минут подряд");
+    var r = $("footR"); r.innerHTML = "";
+    if (d.bot) { var a = document.createElement("a"); a.href = "https://t.me/" + d.bot; a.textContent = "@" + d.bot; a.target = "_blank"; a.rel = "noopener"; r.appendChild(a); }
+  }
+
+  load();
+})();
+</script>
