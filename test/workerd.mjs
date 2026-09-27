@@ -29,6 +29,18 @@ const mf = new Miniflare({
     if (url.hostname === 'ya.ru') return new Response('ok');
     if (url.hostname !== 'api.telegram.org') return new Response('blocked', { status: 599 });
     const method = url.pathname.split('/').pop();
+    if (method === 'sendPhoto') {
+      const fd = await req.formData().catch(() => null);
+      const photo = fd && fd.get('photo');
+      tg.push({ method, body: {
+        chat_id: fd ? Number(fd.get('chat_id')) : undefined,
+        caption: fd ? fd.get('caption') : undefined,
+        message_thread_id: fd && fd.get('message_thread_id') ? Number(fd.get('message_thread_id')) : undefined,
+        photo_size: photo && photo.size ? photo.size : 0,
+        reply_markup: fd ? fd.get('reply_markup') : undefined,
+      } });
+      return Response.json({ ok: true, result: { message_id: ++msgId } });
+    }
     const body = await req.json().catch(() => ({}));
     tg.push({ method, body });
     const result = method === 'getMe' ? { id: 999, username: 'smoke_monitor_bot' }
@@ -103,6 +115,20 @@ try {
   assert.equal(row.thread_id, 5, 'колонка thread_id добавлена миграцией и заполнена');
   assert.ok(row.pm_msg, 'колонки разбора добавлены миграцией, «снова работает» ждёт разбор');
   assert.equal(tg.filter((c) => c.method === 'editForumTopic').at(-1).body.name, '🟢 Базис работает');
+
+  // итоги недели картинкой: рендерим PNG в настоящем рантайме и шлём как sendPhoto с кнопкой
+  const wBefore = tg.length;
+  const t0 = performance.now();
+  const wr = await mf.dispatchFetch(base + '/debug/weekly', { headers: { 'x-admin-key': ADMIN } });
+  const wMs = performance.now() - t0;
+  assert.equal(wr.status, 200, await wr.text());
+  const photo = tg.slice(wBefore).find((c) => c.method === 'sendPhoto');
+  assert.ok(photo, 'итоги недели пришли картинкой (sendPhoto)');
+  assert.equal(photo.body.message_thread_id, 5, 'итоги недели — в теме тревог');
+  assert.ok(photo.body.photo_size > 2000, 'картинка приложена, ' + photo.body.photo_size + ' Б');
+  assert.ok(photo.body.reply_markup && /inline_keyboard/.test(photo.body.reply_markup), 'кнопка дашборда');
+  assert.match(photo.body.caption || '', /итоги недели/);
+  console.log(`  итоги недели: картинка ${(photo.body.photo_size / 1024) | 0} КБ, /debug/weekly ${wMs.toFixed(0)} мс (вместе с I/O)`);
 
   const health = await mf.dispatchFetch(base + '/health');
   assert.equal(health.status, 200, await health.text());

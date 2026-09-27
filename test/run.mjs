@@ -82,7 +82,19 @@ async function tgMock(url, init) {
   assert.ok(m, 'bad tg url ' + url);
   assert.equal(m[1], TOKEN);
   const method = m[2];
-  const params = JSON.parse(init.body || '{}');
+  let params;
+  if (init.body instanceof FormData) {
+    params = {};
+    for (const [k, v] of init.body.entries()) {
+      if (k === 'photo') { params.photo = v; params.photo_size = v.size; }
+      else if (k === 'reply_markup') { try { params.reply_markup = JSON.parse(v); } catch { params.reply_markup = v; } }
+      else if (k === 'disable_notification') params[k] = v === 'true';
+      else if (k === 'message_thread_id') params[k] = Number(v);
+      else params[k] = v;
+    }
+  } else {
+    params = JSON.parse(init.body || '{}');
+  }
   calls.push({ method, params });
   const ok = (result = true) => new Response(JSON.stringify({ ok: true, result }), { headers: { 'content-type': 'application/json' } });
   const fail = (d) => new Response(JSON.stringify({ ok: false, description: d }), { status: 400, headers: { 'content-type': 'application/json' } });
@@ -95,6 +107,10 @@ async function tgMock(url, init) {
       if (blocked.has(Number(params.chat_id))) return fail('Forbidden: bot was blocked by the user');
       msgThread.set(msgSeq + 1, th);
       return ok({ message_id: ++msgSeq, chat: { id: params.chat_id }, message_thread_id: th ?? undefined, text: params.text });
+    case 'sendPhoto':
+      if (blocked.has(Number(params.chat_id))) return fail('Forbidden: bot was blocked by the user');
+      msgThread.set(msgSeq + 1, th);
+      return ok({ message_id: ++msgSeq, chat: { id: params.chat_id }, message_thread_id: th ?? undefined, caption: params.caption });
     case 'deleteMessage':
       if (undeletable.has(params.message_id)) return fail("Bad Request: message can't be deleted");
       return ok(true);
@@ -716,20 +732,27 @@ await scenario('заблокировавшему бота подписчику �
   await ticks(2);
 });
 
-await scenario('итоги недели в понедельник в 10:00', async () => {
-  // перематываем на ближайший понедельник 09:58 МСК
+await scenario('итоги недели в понедельник в 9:00 — картинкой', async () => {
+  // перематываем на ближайший понедельник 08:58 МСК (отчёт идёт с 9:00)
   let t = NOW;
   while (new Date(t + 3 * 3600e3).getUTCDay() !== 1) t += 86400e3;
   const d = new Date(t + 3 * 3600e3);
-  NOW = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 9, 58) - 3 * 3600e3;
-  const before = calls.length;
+  NOW = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 58) - 3 * 3600e3;
+  const isWeekly = (c) => c.method === 'sendPhoto' && /итоги недели/.test(c.params.caption || '');
+  let before = calls.length;
+  await ticks(1); // 08:59 — ещё рано
+  assert.equal(since(before).filter(isWeekly).length, 0, 'до 9:00 не шлём');
+  NOW += 2 * 60e3; // 09:01
+  before = calls.length;
   await ticks(3);
-  const weekly = since(before).filter((c) => c.method === 'sendMessage' && /Базис за неделю/.test(c.params.text));
+  const weekly = since(before).filter(isWeekly);
   assert.equal(weekly.length, 1);
-  assert.match(weekly[0].params.text, /Доступность <b>/);
+  assert.match(weekly[0].params.caption, /Доступность <b>|данных нет/);
   assert.equal(weekly[0].params.disable_notification, true);
+  assert.ok(weekly[0].params.photo_size > 2000, 'к отчёту приложена картинка');
+  assert.ok(weekly[0].params.reply_markup && weekly[0].params.reply_markup.inline_keyboard, 'есть кнопка дашборда');
   await ticks(2);
-  assert.equal(calls.filter((c) => c.method === 'sendMessage' && /Базис за неделю/.test(c.params.text)).length, 1, 'один раз в неделю');
+  assert.equal(since(before).filter(isWeekly).length, 1, 'один раз в неделю');
 });
 
 await scenario('вебхук: чужой секрет — 403, повтор апдейта — duplicate', async () => {
