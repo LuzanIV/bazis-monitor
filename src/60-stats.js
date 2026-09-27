@@ -177,24 +177,7 @@ async function incidentsText(env, S) {
 }
 
 // Итоги за период (неделя) — для сообщения в чат
-async function periodSummary(env, S, from, to, title) {
-  const c = await svcCounts(env, S, from, to);
-  const incs = (await incidentsBetween(env, from, to)).filter((i) => i.started_at >= from);
-  const down = incs.filter((i) => i.kind === 'down');
-  const L = [title];
-  if (!c.up && !c.down) L.push('Данных за период нет — монитор не работал.');
-  else L.push(down.length ? `Доступность <b>${pctText(c)}</b> · ${down.length} ${plural(down.length, 'падение', 'падения', 'падений')} · простой ${dur(c.down * 60)}` : `Доступность <b>${pctText(c)}</b> · падений не было 👌`);
-  const lat = [];
-  for (const t of getTargets(S)) {
-    const l = await latency(env, t.id, from, to);
-    if (l) lat.push(`${esc(t.name)} ${sec(l.avg)} (p95 ${sec(l.p95)})`);
-  }
-  if (lat.length) L.push(`⏱ Время ответа: ${lat.join(' · ')}`);
-  if (c.planned) L.push(`🔧 Плановые работы: ${dur(c.planned * 60)}`);
-  if (incs.length) L.push('', ...incs.slice(0, 6).map((i) => incidentLine(i, nowS())));
-  L.push('', '📈 Подробно — /dash');
-  return L.join('\n');
-}
+// (periodSummary убрана в 1.4.0 — итоги недели теперь картинкой + подпись, см. sendWeekly в 40-alerts.js)
 
 // ─── данные для дашборда ────────────────────────────────────────────────────
 

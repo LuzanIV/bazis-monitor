@@ -394,10 +394,10 @@ async function dailyIfDue(env, S, now) {
     ]);
     S.cleanup_day = day;
   }
-  // Итоги недели — в понедельник с 10:00 МСК
+  // Итоги недели — в понедельник с 9:00 МСК
   const wd = mskWeekday(now); // 0 — понедельник
   const week = mskDay(now - wd * 86400);
-  if (wd === 0 && h >= 10 && cfg(S, 'weekly') && S.weekly_sent !== week && S.chat_id) {
+  if (wd === 0 && h >= 9 && cfg(S, 'weekly') && S.weekly_sent !== week && S.chat_id) {
     await saveSettings(env, S, { weekly_sent: week });
     await sendWeekly(env, S, now);
   }

@@ -17,6 +17,7 @@ export default {
       if (p === '/setup') return await onSetup(env, url);
       if (p === '/health') return await onHealth(env);
       if (p === '/debug/tick') return await onDebugTick(env, url, request);
+      if (p === '/debug/weekly') return await onDebugWeekly(env, url, request);
       if (p === '/') return Response.redirect(`${url.origin}/app`, 302);
       return new Response(`Базис · мониторинг v${VERSION}`, { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
     } catch (e) {
@@ -60,4 +61,14 @@ async function onDebugTick(env, url, request) {
   }
   const out = await tick(env, Date.now(), { manual: true });
   return json({ ok: true, ...out });
+}
+
+// Прислать итоги недели сейчас (админ-ключ) — для проверки отчёта и картинки, не дожидаясь понедельника
+async function onDebugWeekly(env, url, request) {
+  if (!(await isAdmin(env, url, request))) return new Response('forbidden', { status: 403 });
+  await ensureSchema(env);
+  const S = await loadSettings(env);
+  if (!S.chat_id) return json({ ok: false, error: 'чат для тревог не назначен' }, 400);
+  await sendWeekly(env, S, nowS());
+  return json({ ok: true });
 }

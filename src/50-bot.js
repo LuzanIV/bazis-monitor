@@ -199,6 +199,8 @@ async function onCommand(ctx, cmd, arg) {
       return onGuide(ctx);
     case 'drill':
       return onDrill(ctx);
+    case 'weekly':
+      return onWeekly(ctx);
     case 'oncall':
       return onOncall(ctx, arg);
     case 'settings':
@@ -220,6 +222,14 @@ async function onCommand(ctx, cmd, arg) {
     default:
       return ctx.private ? say(ctx, 'Не знаю такую команду. /help — подсказка.') : null;
   }
+}
+
+// /weekly — прислать итоги недели сейчас (владелец): удобно проверить отчёт и картинку, не дожидаясь понедельника
+async function onWeekly(ctx) {
+  if (!ctx.isOwner) return say(ctx, '🔒 Только владелец.');
+  if (!ctx.S.chat_id) return say(ctx, 'Чат для тревог ещё не назначен — добавьте меня в чат разработчиков и напишите /bind в теме.');
+  await sendWeekly(ctx.env, ctx.S, nowS());
+  return say(ctx, '📊 Итоги недели отправлены в чат тревог.');
 }
 
 function menuKb() {
@@ -564,7 +574,7 @@ function settingsView(S) {
     `• Проверка прода: <b>${ev > 1 ? `раз в ${ev} мин` : 'каждую минуту'}</b>${ev > 1 ? ', а пока что-то не так (сбой, падение, пауза) — каждую минуту' : ''}`,
     `• Тревога после <b>${fa}</b> ${plural(fa, 'неудачной минуты', 'неудачных минут подряд', 'неудачных минут подряд')}`,
     `• Повтор, пока никто не взял: каждые <b>${re} мин</b> (после 30 мин — раз в 15, после 2 ч — раз в час)`,
-    `• Итоги недели по понедельникам в 10:00: <b>${wk ? 'включены' : 'выключены'}</b>`,
+    `• Итоги недели по понедельникам в 9:00: <b>${wk ? 'включены' : 'выключены'}</b>`,
     `• Дежурные: ${oncallList(S).map((u) => '@' + esc(u)).join(' ') || '—'} (+ кто нажал «📣 Упоминать меня») — /oncall`,
     `• Чат тревог: ${S.chat_id ? boundText(S) : 'не назначен — тревоги идут владельцу в личку'}`,
     `• Сирена: ${S.siren_sticker ? 'свой стикер (/siren reset — вернуть 🚨)' : '🚨 (свой стикер — /siren)'}`,

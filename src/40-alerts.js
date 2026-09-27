@@ -602,11 +602,116 @@ async function finishDrill(env, S, inc, now) {
 
 // ─── итоги недели ───────────────────────────────────────────────────────────
 
+// Фото с картинкой-карточкой (multipart). Тема недоступна — повторяем в General.
+async function sendPhotoTo(env, S, place, png, caption, extra = {}) {
+  const build = (thread) => {
+    const fd = new FormData();
+    fd.append('chat_id', String(place.chat));
+    if (thread) fd.append('message_thread_id', String(thread));
+    fd.append('photo', new Blob([png], { type: 'image/png' }), 'week.png');
+    if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+    if (extra.reply_markup) fd.append('reply_markup', JSON.stringify(extra.reply_markup));
+    if (extra.disable_notification) fd.append('disable_notification', 'true');
+    return fd;
+  };
+  const call = async (thread) => {
+    let r;
+    try {
+      r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`, { method: 'POST', body: build(thread) });
+    } catch (e) { console.warn('TG sendPhoto', e && e.message); return { ok: false, description: String(e && e.message) }; }
+    let j;
+    try { j = await r.json(); } catch { j = { ok: false, description: `HTTP ${r.status}` }; }
+    if (!j.ok) console.warn('TG sendPhoto', j.description);
+    return j;
+  };
+  let r = await call(place.thread);
+  const d = r.description || '';
+  if (!r.ok && place.thread && (TOPIC_GONE.test(d) || TOPIC_CLOSED.test(d))) {
+    await topicTrouble(env, S, place.chat, place.thread, TOPIC_GONE.test(d));
+    r = await call(null);
+    r.lostThread = true;
+  }
+  return r;
+}
+
+const WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+// Собираем всё, что нужно для картинки и подписи (за прошлую неделю Пн–Вс)
+async function weeklyData(env, S, from, to) {
+  const c = await svcCounts(env, S, from, to);
+  const totAll = c.up + c.down;
+  const fracAll = totAll ? c.up / totAll : null;
+  let availState;
+  if (fracAll == null) availState = undefined;
+  else if (fracAll >= 0.999) availState = 'good';
+  else if (fracAll >= 0.99) availState = 'warn';
+  else availState = 'crit';
+
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const a = from + i * 86400, b = a + 86400;
+    const cd = await svcCounts(env, S, a, b);
+    const tot = cd.up + cd.down;
+    const frac = tot ? cd.up / tot : null;
+    let state, h;
+    if (cd.down > 0) { state = 'crit'; h = frac; }
+    else if (tot > 0) { state = frac >= 0.999 ? 'good' : 'warn'; h = frac; }
+    else if (cd.planned > 0) { state = 'planned'; h = 0.4; }
+    else { state = 'nodata'; h = 0; }
+    days.push({ label: WD_SHORT[i], date: String(Number(mskIso(a).slice(8, 10))), state, h });
+  }
+
+  const t0 = getTargets(S)[0];
+  const lat = t0 ? await latency(env, t0.id, from, to) : null;
+
+  const d1 = mskIso(from), d2 = mskIso(to - 86400);
+  const day1 = Number(d1.slice(8, 10)), day2 = Number(d2.slice(8, 10)), mo1 = +d1.slice(5, 7), mo2 = +d2.slice(5, 7);
+  const range = mo1 === mo2 ? `${day1}–${day2} ${MONTHS_GEN[mo2 - 1]}` : `${day1} ${MONTHS_GEN[mo1 - 1]} – ${day2} ${MONTHS_GEN[mo2 - 1]}`;
+
+  return { c, fracAll, availState, availText: pctText(c), days, lat, range };
+}
+
 async function sendWeekly(env, S, now) {
   const chat = S.chat_id ? Number(S.chat_id) : null;
   if (!chat) return;
   const to = mskDayStart(now); // понедельник 00:00 МСК
   const from = to - 7 * 86400;
-  const text = await periodSummary(env, S, from, to, `📊 <b>${SERVICE.name} за неделю</b> · ${dayMonth(from)} – ${dayMonth(to - 86400)}`);
-  await sendTo(env, S, { chat, thread: alertThread(S, chat) }, text, { disable_notification: true });
+  const place = { chat, thread: alertThread(S, chat) };
+
+  const d = await weeklyData(env, S, from, to);
+  const incs = (await incidentsBetween(env, from, to)).filter((i) => i.started_at >= from);
+  const downs = incs.filter((i) => i.kind === 'down');
+
+  const stats = [
+    { dot: downs.length ? 'crit' : 'good', strong: true, text: downs.length ? `${downs.length} ${plural(downs.length, 'падение', 'падения', 'падений')}` : 'падений не было' },
+    { text: `простой  ${d.c.down ? dur(d.c.down * 60) : '0'}` },
+    d.lat ? { text: `ответ  ${sec(d.lat.p50)} · p95 ${sec(d.lat.p95)}` } : { text: 'ответ  —' },
+  ];
+  let png = null;
+  try { png = weeklyCard({ title: 'Итоги недели', range: d.range, availText: d.availText, availState: d.availState, stats, days: d.days }); }
+  catch (e) { console.warn('weeklyCard', e && e.message); }
+
+  // подпись (лимит Telegram — 1024 символа)
+  const L = [`📊 <b>${SERVICE.name} · итоги недели</b> · ${d.range}`];
+  if (d.fracAll == null) L.push('За неделю данных нет — монитор не работал.');
+  else if (downs.length) L.push(`Доступность <b>${d.availText}</b> · ${downs.length} ${plural(downs.length, 'падение', 'падения', 'падений')} · простой ${dur(d.c.down * 60)}`);
+  else L.push(`Доступность <b>${d.availText}</b> · падений не было 👌`);
+  if (d.lat) L.push(`⏱ Ответ ${sec(d.lat.avg)} · p95 ${sec(d.lat.p95)}`);
+  if (d.c.planned) L.push(`🔧 Плановые работы: ${dur(d.c.planned * 60)}`);
+  const head = L.slice();
+  if (incs.length) { L.push(''); for (const i of incs.slice(0, 3)) L.push(incidentLine(i, now)); }
+  L.push('', '📈 Подробнее — на дашборде 👇');
+  let caption = L.join('\n');
+  if (caption.length > 1000) caption = [...head, '', '📈 Подробнее — на дашборде 👇'].join('\n');
+
+  const url = await dashUrlFor(env, S, chat);
+  const kb = url ? { inline_keyboard: [[{ text: '📈 Открыть дашборд', url }]] } : undefined;
+
+  // одноразовая врезка (например, «собрана статистика за прошлые периоды»), затем гасим
+  if (S.weekly_intro) {
+    await sendTo(env, S, place, S.weekly_intro, { disable_notification: true });
+    await saveSettings(env, S, { weekly_intro: null });
+  }
+  if (png) await sendPhotoTo(env, S, place, png, caption, { reply_markup: kb, disable_notification: true });
+  else await sendTo(env, S, place, caption, { reply_markup: kb, disable_notification: true });
 }
