@@ -1,6 +1,6 @@
 {
   "name": "bazis-monitor",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "private": true,
   "description": "«Мониторинг» — алертный Telegram-бот и дашборд доступности прода Базиса (etalon.iflat.io). Cloudflare Worker + D1 + Cron.",
   "type": "module",
@@ -12,7 +12,9 @@
     "test": "node build.mjs && node test/run.mjs",
     "test:workerd": "node build.mjs && node test/workerd.mjs",
     "preview": "node build.mjs && node test/preview.mjs",
-    "art": "node art/make-art.mjs"
+    "card": "node test/card.mjs",
+    "art": "node art/make-art.mjs",
+    "card-font": "node art/make-card-font.mjs"
   },
   "author": "LuzanIV",
   "license": "UNLICENSED",

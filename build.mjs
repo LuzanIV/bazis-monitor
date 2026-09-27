@@ -25,6 +25,14 @@ w = w.replace(htmlSlot, () => 'const APP_HTML = String.raw`' + page + '`;');
 const icon = b64('./app/icon.png');
 w = w.replace(iconSlot, () => "const ICON_PNG_B64 = '" + icon + "';");
 
+// Атлас шрифта для картинки «итоги недели» (art/make-card-font.mjs → app/card-font.json)
+const fontSlot = "'__CARD_FONT__'";
+if (w.includes(fontSlot)) {
+  if (!fs.existsSync(u('./app/card-font.json'))) throw new Error('нет app/card-font.json — сначала node art/make-card-font.mjs');
+  const fontJson = read('./app/card-font.json');
+  w = w.replace(fontSlot, () => JSON.stringify(fontJson));
+}
+
 fs.mkdirSync(u('./dist/'), { recursive: true });
 fs.writeFileSync(u('./dist/worker.js'), w);
 const kb = (s) => (Buffer.byteLength(s) / 1024).toFixed(0);
