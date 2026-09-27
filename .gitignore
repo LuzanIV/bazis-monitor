@@ -1,0 +1,21 @@
+# зависимости
+node_modules/
+
+# сборка: dist/worker.js и готовая страница — собираются `npm run build`, в релиз идут файлом
+dist/
+app/app.html
+
+# скриншоты и картинки — собираются `npm run preview` и `npm run art`, картинки для BotFather — в релизе
+test/shots/
+art/*.png
+art/*.svg
+
+# локальное окружение Cloudflare и секреты
+.wrangler/
+.dev.vars
+.env*
+
+# прочее
+*.log
+.DS_Store
+Thumbs.db
