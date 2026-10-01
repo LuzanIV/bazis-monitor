@@ -14,7 +14,8 @@
     "preview": "node build.mjs && node test/preview.mjs",
     "card": "node test/card.mjs",
     "art": "node art/make-art.mjs",
-    "card-font": "node art/make-card-font.mjs"
+    "card-font": "node art/make-card-font.mjs",
+    "avatar": "node art/make-avatar-anim.mjs"
   },
   "author": "LuzanIV",
   "license": "UNLICENSED",

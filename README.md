@@ -38,9 +38,10 @@
 | `test/card.mjs` | Пример карточки «итоги недели» → `test/shots/week-card*.png`. |
 | `art/make-art.mjs` | Картинки бота: аватар и картинка описания для BotFather (`art/*.png`), иконка дашборда. |
 | `art/make-card-font.mjs` | Собирает атлас глифов Manrope → `app/card-font.json` (нужен, если менять шрифт или размеры карточки). |
+| `art/make-avatar-anim.mjs` | Анимированный аватар и баннер описания: Chromium снимает кадры → `ffmpeg` собирает `avatar-anim.mp4` (720×720) и `description.gif` (640×360). Нужен `ffmpeg`. |
 | `docs/` | Описание бота и инструкция для чата разработчиков. |
 
-Собранные файлы в репозиторий не кладутся: `dist/`, `app/app.html`, `test/shots/`, `art/*.png`, `art/*.svg`. Готовый `worker-X.Y.Z.js` и картинки для BotFather прикреплены к релизу своей версии.
+Собранные файлы в репозиторий не кладутся: `dist/`, `app/app.html`, `test/shots/`, `art/*.png`, `art/*.svg`, `art/*.mp4`, `art/*.gif`. Готовый `worker-X.Y.Z.js`, картинки и анимированный аватар для BotFather прикреплены к релизу своей версии.
 
 ## Установка
 
@@ -61,6 +62,7 @@ npm run preview        # сборка + скриншоты дашборда в t
 npm run card           # пример карточки «итоги недели» → test/shots/week-card*.png
 npm run art            # картинки бота: art/avatar.png, art/description.png, app/icon.png
 npm run card-font      # пересобрать атлас шрифта карточки → app/card-font.json
+npm run avatar         # анимированный аватар art/avatar-anim.mp4 + баннер art/description.gif (нужен ffmpeg)
 ```
 
 ## Выкладка на прод

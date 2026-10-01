@@ -9,6 +9,11 @@ app/app.html
 test/shots/
 art/*.png
 art/*.svg
+# анимация аватара — собирается `npm run avatar`, готовые файлы в релизе
+art/*.mp4
+art/*.gif
+art/frames/
+art/framesw/
 
 # локальное окружение Cloudflare и секреты
 .wrangler/
