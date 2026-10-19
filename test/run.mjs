@@ -30,21 +30,26 @@ Date.now = () => NOW;
 const minuteStart = (ms) => Math.floor(ms / 60000) * 60000;
 
 // ─── прод и сеть ────────────────────────────────────────────────────────────
-const prod = { web: 'up', api: 'up', control: 'up', latency: 230, extra: 'up' };
+// Прод — sk.etalongroup.com (с 1.5.0); старый адрес etalon.iflat.io после потери дата-центра не отвечает (old)
+const prod = { web: 'up', api: 'up', control: 'up', latency: 230, extra: 'up', old: 'dead' };
 const seen = [];
 const timeoutErr = () => { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; return e; };
 function prodMock(url) {
   seen.push(url);
   NOW += prod.latency;
   const html = (body, status = 200) => new Response(body, { status, headers: { 'content-type': 'text/html; charset=UTF-8' } });
-  if (url.startsWith('https://etalon.iflat.io/login')) {
-    if (prod.web === 'up') return html('<!doctype html><html><head><title>\n\t\tВход в личный кабинет |\n\tetalon.iflat.io</title></head><body><div id="app"></div></body></html>');
+  if (url.startsWith('https://etalon.iflat.io/')) {
+    if (prod.old === 'up') return url.includes('/api/') ? new Response('{"message":"Unauthenticated."}', { status: 401, headers: { 'content-type': 'application/json' } }) : html('<div id="app"></div>');
+    throw new TypeError('Network connection lost.');
+  }
+  if (url.startsWith('https://sk.etalongroup.com/login')) {
+    if (prod.web === 'up') return html('<!doctype html><html><head><title>\n\t\tВход в личный кабинет |\n\tsk.etalongroup.com</title></head><body><div id="app"></div></body></html>');
     if (prod.web === '502') return html('<html><head><title>502 Bad Gateway</title></head><body><center>nginx</center></body></html>', 502);
     if (prod.web === 'maint') return html('<html><head><title>Технические работы</title></head><body>Скоро вернёмся</body></html>');
     if (prod.web === 'timeout') throw timeoutErr();
     throw new TypeError('Network connection lost.');
   }
-  if (url.startsWith('https://etalon.iflat.io/api/v1/houses')) {
+  if (url.startsWith('https://sk.etalongroup.com/api/v1/houses')) {
     if (prod.api === 'up') return new Response('{"message":"Unauthenticated."}', { status: 401, headers: { 'content-type': 'application/json' } });
     if (prod.api === '502') return html('<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>', 502);
     if (prod.api === 'html') return html('<html><head><title>Ошибка</title></head><body>oops</body></html>', 200);
@@ -231,6 +236,18 @@ await scenario('чистые функции: длительности, проц�
   assert.deepEqual(T.parseCommand('/status@bazis_monitor_test_bot', 'bazis_monitor_test_bot'), { cmd: 'status', arg: '' });
   assert.equal(T.parseCommand('/status@other_bot', 'bazis_monitor_test_bot'), null);
   assert.deepEqual(T.parseCommand('/mute 2h', 'x'), { cmd: 'mute', arg: '2h' });
+  // 1.5.0: адреса старого прода → новый прод; путь, запрос и порт те же; чужие адреса не трогаем
+  assert.equal(T.movedUrl('https://etalon.iflat.io/login'), 'https://sk.etalongroup.com/login');
+  assert.equal(T.movedUrl('https://etalon.iflat.io/api/v1/houses?perPage=1'), 'https://sk.etalongroup.com/api/v1/houses?perPage=1');
+  assert.equal(T.movedUrl('https://etalon.iflat.io:8443/panel#x'), 'https://sk.etalongroup.com:8443/panel#x');
+  assert.equal(T.movedUrl('https://iflat.io/login'), 'https://iflat.io/login');
+  assert.equal(T.movedUrl('https://evil.example/etalon.iflat.io/'), 'https://evil.example/etalon.iflat.io/');
+  assert.equal(T.movedUrl('не адрес'), 'не адрес');
+  assert.deepEqual(T.getTargets({}).map((t) => t.url), ['https://sk.etalongroup.com/login', 'https://sk.etalongroup.com/api/v1/houses?perPage=1']);
+  assert.equal(T.spanText(now, now + 2 * 3600), '10:00 → 12:00 МСК');
+  assert.equal(T.spanText(now - 17 * 86400, now), '12 сентября 10:00 → 29 сентября 10:00 МСК');
+  assert.equal(T.incHost({ note: 'after_planned:1 moved:etalon.iflat.io' }), 'etalon.iflat.io');
+  assert.equal(T.incHost({ note: null }), 'sk.etalongroup.com');
 });
 
 await scenario('/setup: вебхук, команды, пробная проверка, кнопка стать владельцем', async () => {
@@ -270,6 +287,10 @@ await scenario('пока чат не привязан, работает; про�
   assert.equal(q1("SELECT COUNT(*) AS n FROM checks WHERE target = 'api' AND st = 1 AND code = 401").n, 3);
   assert.equal(q1("SELECT MIN(ms) AS ms FROM checks WHERE target = 'api'").ms, 230); // часы общие на оба запроса: второй меряется точно
   assert.equal(since(before).filter((c) => c.method === 'sendMessage').length, 0, 'без падений не пишем');
+  // новая установка: «переезд» — только отметка, сообщений нет; проверяется новый адрес, старый — ни разу
+  assert.equal(q1("SELECT value FROM settings WHERE key = 'host_moved'").value, 'sk.etalongroup.com');
+  assert.ok(seen.some((u) => u.startsWith('https://sk.etalongroup.com/login')) && seen.some((u) => u.startsWith('https://sk.etalongroup.com/api/v1/houses')));
+  assert.ok(!seen.some((u) => u.startsWith('https://etalon.iflat.io/')), 'старый адрес не проверяем');
   const hr = await get('/health');
   assert.equal(hr.status, 200);
   assert.equal((await hr.json()).ok, true);
@@ -332,7 +353,7 @@ await scenario('падение: одна минута — ждём, вторая
   assert.match(card.text, /Не отвечает с <b>10:0\d<\/b> МСК · уже <b>/);
   assert.equal(card.reply_markup.inline_keyboard[0][0].text, '🙋 Беру');
   assert.match(card.reply_markup.inline_keyboard[1][0].callback_data, /^mute:60$/);
-  assert.equal(card.reply_markup.inline_keyboard[2][1].url, 'https://etalon.iflat.io/panel');
+  assert.equal(card.reply_markup.inline_keyboard[2][1].url, 'https://sk.etalongroup.com/panel');
   cardMsg = msgSeq - (out.length - 2); // id карточки
   const pin = since(before).find((c) => c.method === 'pinChatMessage');
   assert.equal(pin.params.disable_notification, false);
@@ -933,7 +954,7 @@ await scenario('проверка раз в 5 минут: между провер
   await hook(cb(OWNER, 'cfg:every:5', OWNER.id, 900));
   assert.equal(settings().check_every, '5');
   assert.match(calls.filter((c) => c.method === 'editMessageText' && c.params.message_id === 900).at(-1).params.text, /Проверка прода: <b>раз в 5 мин<\/b>, а пока что-то не так/);
-  const hits = () => seen.filter((u) => u.startsWith('https://etalon.iflat.io/')).length;
+  const hits = () => seen.filter((u) => u.startsWith('https://sk.etalongroup.com/')).length;
   while ((minuteStart(NOW) / 60000 + 1) % 5 !== 0) await tick(); // следующий прогон — ровно на пятиминутке
   let h0 = hits();
   await ticks(5);
@@ -1011,6 +1032,127 @@ await scenario('/health показывает, что монитор жив; debu
   NOW += 10 * 60e3; // монитор 10 минут не запускался
   const stale = await get('/health');
   assert.equal(stale.status, 503);
+});
+
+await scenario('1.5.0: переезд прода на sk.etalongroup.com — свои проверки переведены, падение старого адреса закрыто без «снова работает», разбор, дальше — новый адрес', async () => {
+  // Как на проде перед выкладкой: бот 1.4.0 проверял etalon.iflat.io, дата-центр потерян, падение висит 17 дней,
+  // тревогу взял разработчик; владелец добавил свою проверку тестового iflat.io
+  prod.web = 'up';
+  prod.api = 'up';
+  prod.extra = 'up';
+  prod.old = 'dead';
+  // бот снова в чате разработчиков (прошлый сценарий его удалил), тревоги — в общую ленту
+  await hook({ update_id: uid++, my_chat_member: { chat: { id: GROUP, type: 'supergroup', title: 'Базис · разработка' }, from: OWNER, date: 1, old_chat_member: { status: 'left', user: { id: BOT_ID } }, new_chat_member: { status: 'member', user: { id: BOT_ID } } } });
+  await ticks(3);
+  const S0 = Object.fromEntries(q('SELECT key, value FROM settings').map((r) => [r.key, r.value]));
+  assert.equal(S0.chat_id, String(GROUP));
+  assert.equal(S0.host_moved, 'sk.etalongroup.com');
+  env.DB.db.prepare("DELETE FROM settings WHERE key = 'host_moved'").run();
+  const oldTargets = [
+    { id: 'web', name: 'Сайт', url: 'https://etalon.iflat.io/login', expect: [200], kind: 'html', marker: 'id="app"' },
+    { id: 'api', name: 'API', url: 'https://etalon.iflat.io/api/v1/houses?perPage=1', expect: [200, 401], kind: 'json' },
+    { id: 't3', name: 'Тест', url: 'https://iflat.io/login', expect: [200], kind: 'html' },
+  ];
+  env.DB.db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('targets', ?)").run(JSON.stringify(oldTargets));
+  const now0 = Math.floor(NOW / 1000);
+  const started = now0 - 17 * 86400 - 5400;
+  const thread = Number(S0.thread_id) || null;
+  const card = ++msgSeq;
+  msgThread.set(card, thread);
+  const ins = env.DB.db.prepare(`INSERT INTO incidents (kind, started_at, confirmed_at, targets, cause, acked_uid, acked_name, acked_at, chat_id, thread_id, msg_id, last_remind, last_edit)
+    VALUES ('down', ?, ?, ?, ?, ?, 'Александр', ?, ?, ?, ?, ?, ?)`).run(started, started + 120, JSON.stringify({ web: { n: 'Сайт', ok: 0, e: 'нет ответа за 12 с', c: null }, api: { n: 'API', ok: 0, e: 'нет ответа за 12 с', c: null } }),
+    'Сайт — нет ответа за 12 с', DEV.id, started + 600, GROUP, thread, card, now0 - 3600, now0 - 300);
+  const incId = Number(ins.lastInsertRowid);
+  const seen0 = seen.length;
+  let before = calls.length;
+  await tick();
+  const moveAt = Math.floor(NOW / 1000);
+  // свой список: адреса старого прода — на новом, остальное как было
+  const tg = JSON.parse(q1("SELECT value FROM settings WHERE key = 'targets'").value);
+  assert.deepEqual(tg.map((t) => [t.id, t.name, t.url, t.expect]), [
+    ['web', 'Сайт', 'https://sk.etalongroup.com/login', [200]],
+    ['api', 'API', 'https://sk.etalongroup.com/api/v1/houses?perPage=1', [200, 401]],
+    ['t3', 'Тест', 'https://iflat.io/login', [200]],
+  ]);
+  assert.equal(q1("SELECT value FROM settings WHERE key = 'host_moved'").value, 'sk.etalongroup.com');
+  // в этом же прогоне — проверка нового адреса, старый не трогаем
+  const hits = seen.slice(seen0);
+  assert.ok(hits.some((u) => u.startsWith('https://sk.etalongroup.com/login')) && hits.some((u) => u.startsWith('https://sk.etalongroup.com/api/')), 'новый адрес проверен сразу');
+  assert.ok(!hits.some((u) => u.startsWith('https://etalon.iflat.io/')), 'старый адрес больше не проверяем');
+  // падение закрыто на момент переезда
+  const inc = q1('SELECT * FROM incidents WHERE id = ?', incId);
+  assert.equal(inc.ended_at, moveAt);
+  assert.match(inc.note, /(^|\s)moved:etalon\.iflat\.io$/);
+  // одно сообщение в тему тревог — ответом на карточку; «снова работает» и сирены нет
+  const out = since(before);
+  const msgs = out.filter((c) => c.method === 'sendMessage' && String(c.params.chat_id) === String(GROUP));
+  assert.equal(msgs.length, 1, msgs.map((m) => m.params.text).join('\n---\n'));
+  const mv = msgs[0].params;
+  assert.equal(mv.message_thread_id ?? null, thread);
+  assert.equal(mv.reply_parameters.message_id, card);
+  assert.match(mv.text, /^🔀 <b>Мониторинг переехал на новый адрес прода<\/b>\nТеперь проверяю <b>sk\.etalongroup\.com<\/b> — страницу входа и API, каждую минуту\. Старый адрес etalon\.iflat\.io больше не проверяю\.\n/);
+  assert.match(mv.text, /\nПадение старого адреса закрыл на момент переезда: не отвечал <b>17 д 1 ч<\/b> · \d+ \S+ \d\d:\d\d → \d+ \S+ \d\d:\d\d МСК\.\n🙋 Кто разбирался: <b>Александр<\/b>\n\n📝 <b>Разбор:<\/b> @Kiss_Alexandr, ответьте на это сообщение одной строкой/);
+  assert.equal(mv.reply_markup.force_reply, true);
+  assert.ok(!out.some((c) => /СНОВА РАБОТАЕТ|🚨/.test(c.params.text || '')), 'не «снова работает» и не сирена');
+  // карточка: закрыто при переезде, старый адрес, открепили
+  const ed = out.find((c) => c.method === 'editMessageText' && c.params.message_id === card);
+  assert.match(ed.params.text, /^✅ <b>ЗАКРЫТО ПРИ ПЕРЕЕЗДЕ<\/b> · <s>БАЗИС НЕДОСТУПЕН<\/s>\netalon\.iflat\.io · прод\n/);
+  assert.match(ed.params.text, /⏱ Не отвечал <b>17 д 1 ч<\/b> · \d+ \S+ \d\d:\d\d → \d+ \S+ \d\d:\d\d МСК\n🔀 Прод переехал на sk\.etalongroup\.com — старый адрес больше не проверяю/);
+  assert.ok(out.some((c) => c.method === 'unpinChatMessage' && c.params.message_id === card));
+  assert.ok(out.some((c) => c.method === 'sendMessage' && c.params.chat_id === OWNER.id && /🔀 Прод переехал на <b>sk\.etalongroup\.com<\/b>\. Падение старого адреса etalon\.iflat\.io закрыто: не отвечал 17 д 1 ч\./.test(c.params.text)), 'подписчикам — в личку');
+  // разбор — ответом на сообщение о переезде; текст сообщения остаётся «переездом»
+  const botMsg = (id) => ({ message_id: id, from: { id: BOT_ID, is_bot: true, first_name: 'Мониторинг' }, chat: { id: GROUP, type: 'supergroup' }, date: 1 });
+  const pmMsg = q1('SELECT pm_msg FROM incidents WHERE id = ?', incId).pm_msg;
+  assert.ok(pmMsg);
+  before = calls.length;
+  await hook(gm(DEV, 'Потеря дата-центра Яндекса в Сасово; Базис восстановлен из копии 22.09 на sk.etalongroup.com', { reply_to_message: botMsg(pmMsg) }));
+  assert.match(q1('SELECT pm_text FROM incidents WHERE id = ?', incId).pm_text, /^Потеря дата-центра/);
+  const ed2 = since(before).find((c) => c.method === 'editMessageText' && c.params.message_id === pmMsg);
+  assert.match(ed2.params.text, /^🔀 <b>Мониторинг переехал на новый адрес прода<\/b>/);
+  assert.match(ed2.params.text, /📝 <b>Разбор:<\/b> Потеря дата-центра Яндекса в Сасово; Базис восстановлен из копии 22\.09 на sk\.etalongroup\.com — Александр$/);
+  assert.doesNotMatch(ed2.params.text, /СНОВА РАБОТАЕТ|ответьте на это сообщение/);
+  // дальше — обычная жизнь нового адреса: работает — тихо; второй раз переезд не повторяется
+  before = calls.length;
+  await ticks(5);
+  assert.equal(q1("SELECT COUNT(*) AS n FROM incidents WHERE ended_at IS NULL AND kind IN ('down', 'planned')").n, 0);
+  assert.ok(!since(before).some((c) => c.method === 'sendMessage' && /🔀|БАЗИС/.test(c.params.text || '')), 'тихо');
+  // в журнале (CSV для Excel) — падение старого адреса с разбором и длительностью до переезда
+  const csv = await (await get('/api/incidents.csv', { 'x-admin-key': ADMIN })).text();
+  const row = csv.split('\r\n').find((l) => l.startsWith(incId + ';'));
+  assert.ok(row, 'падение в журнале');
+  assert.match(row, /;"Потеря дата-центра Яндекса в Сасово; Базис восстановлен из копии 22\.09 на sk\.etalongroup\.com";Александр$/, 'точка с запятой в разборе — ячейка в кавычках');
+  assert.equal(Number(row.split(';')[3].replace(',', '.')), Math.round((moveAt - started) / 6) / 10, 'длительность — до переезда');
+  await hook(pm(OWNER, '/targets'));
+  assert.match(lastText(OWNER.id), /https:\/\/sk\.etalongroup\.com\/login/);
+  assert.doesNotMatch(lastText(OWNER.id), /etalon\.iflat\.io/);
+  // новый адрес лёг — обычная тревога, в карточке новый адрес
+  prod.web = 'timeout';
+  before = calls.length;
+  await ticks(2);
+  const alert = since(before).find((c) => c.method === 'sendMessage' && String(c.params.chat_id) === String(GROUP) && /🔴 <b>БАЗИС НЕДОСТУПЕН<\/b>/.test(c.params.text || ''));
+  assert.ok(alert, 'тревога по новому адресу');
+  assert.match(alert.params.text, /\nsk\.etalongroup\.com · прод\n/);
+  assert.match(alert.params.text, /❌ <b>Сайт<\/b> — нет ответа за 12 с/);
+  assert.equal(alert.params.reply_markup.inline_keyboard.at(-1).at(-1).url, 'https://sk.etalongroup.com/panel');
+  prod.web = 'up';
+  await ticks(3);
+  assert.equal(q1("SELECT COUNT(*) AS n FROM incidents WHERE ended_at IS NULL AND kind IN ('down', 'planned')").n, 0, 'поднялся — закрыто');
+  // переезд без открытого падения — одно короткое сообщение: что теперь проверяем. Два прогона сразу (Cron и ручной
+  // /debug/tick) — сообщение всё равно одно
+  env.DB.db.prepare("DELETE FROM settings WHERE key = 'host_moved'").run();
+  before = calls.length;
+  NOW = minuteStart(NOW) + 60000;
+  await Promise.all([W.scheduled({ scheduledTime: NOW, cron: '* * * * *' }, env, ctx), get('/debug/tick', { 'x-admin-key': ADMIN })]);
+  await settle();
+  const info = since(before).filter((c) => c.method === 'sendMessage' && String(c.params.chat_id) === String(GROUP));
+  assert.equal(info.length, 1);
+  assert.equal(info[0].params.text, '🔀 <b>Мониторинг переехал на новый адрес прода</b>\nТеперь проверяю <b>sk.etalongroup.com</b> — страницу входа и API, каждую минуту. Старый адрес etalon.iflat.io больше не проверяю.');
+  assert.equal(info[0].params.reply_parameters, undefined);
+  assert.equal(q1("SELECT value FROM settings WHERE key = 'host_moved'").value, 'sk.etalongroup.com');
+  before = calls.length;
+  await ticks(2);
+  assert.ok(!since(before).some((c) => /🔀/.test(c.params.text || '')), 'второй раз не повторяется');
+  env.DB.db.prepare("DELETE FROM settings WHERE key = 'targets'").run();
 });
 
 console.log('\n' + results.map((r) => r.join(' ')).join('\n'));

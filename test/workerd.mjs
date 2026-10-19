@@ -19,10 +19,10 @@ const mf = new Miniflare({
   bindings: { BOT_TOKEN: TOKEN, RETRY_DELAY_MS: '0' },
   outboundService: async (req) => {
     const url = new URL(req.url);
-    if (url.hostname === 'etalon.iflat.io' && url.pathname === '/login') {
+    if (url.hostname === 'sk.etalongroup.com' && url.pathname === '/login') {
       return new Response('<!doctype html><title>Вход</title><div id="app"></div>', { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
-    if (url.hostname === 'etalon.iflat.io' && url.pathname.startsWith('/api/v1/')) {
+    if (url.hostname === 'sk.etalongroup.com' && url.pathname.startsWith('/api/v1/')) {
       if (prod.api === 'up') return Response.json({ message: 'Unauthenticated.' }, { status: 401 });
       return new Response('<html><head><title>502 Bad Gateway</title></head></html>', { status: 502, headers: { 'content-type': 'text/html' } });
     }
