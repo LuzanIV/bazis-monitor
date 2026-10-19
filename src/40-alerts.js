@@ -208,18 +208,19 @@ function renderAlert(inc, o = {}) {
   const title = `${SERVICE.name.toUpperCase()} НЕДОСТУПЕН`;
   const L = [];
   if (drill) L.push('🧪 <b>УЧЕБНАЯ ТРЕВОГА</b> — проверяем бота, Базис в порядке', '');
-  if (inc.ended_at) L.push(`✅ <b>${drill ? 'УЧЕНИЯ ОКОНЧЕНЫ' : 'РЕШЕНО'}</b> · <s>${title}</s>`);
+  if (inc.ended_at) L.push(`✅ <b>${drill ? 'УЧЕНИЯ ОКОНЧЕНЫ' : incMoved(inc) ? 'ЗАКРЫТО ПРИ ПЕРЕЕЗДЕ' : 'РЕШЕНО'}</b> · <s>${title}</s>`);
   else L.push(`🔴 <b>${title}</b>`);
-  L.push(`${esc(SERVICE.host)} · прод`, '');
+  L.push(`${esc(incHost(inc))} · прод`, '');
   for (const t of Object.values(inc.t || {})) {
     if (t.ok === 1) L.push(`✅ ${esc(t.n)} — отвечает`);
     else if (t.ok === 0) L.push(`❌ <b>${esc(t.n)}</b> — ${esc(t.e || 'не отвечает')}`);
     else L.push(`❔ ${esc(t.n)} — ${esc(t.e || 'нет данных')}`);
   }
   const planned = Number((String(inc.note || '').match(/^after_planned:(\d+)/) || [])[1] || 0);
-  if (inc.ended_at) L.push(`⏱ Не отвечал <b>${dur(inc.ended_at - inc.started_at)}</b> · ${hhmm(inc.started_at)} → ${hhmm(inc.ended_at)} МСК`);
-  else if (planned) L.push(`⏱ Не отвечает с <b>${hhmm(planned)}</b> МСК, сначала шли плановые работы · всего <b>${dur(now - planned)}</b>`);
-  else L.push(`⏱ Не отвечает с <b>${hhmm(inc.started_at)}</b> МСК · уже <b>${dur(now - inc.started_at)}</b>`);
+  if (inc.ended_at) L.push(`⏱ Не отвечал <b>${dur(inc.ended_at - inc.started_at)}</b> · ${spanText(inc.started_at, inc.ended_at)}`);
+  else if (planned) L.push(`⏱ Не отвечает с <b>${sinceText(planned, now)}</b> МСК, сначала шли плановые работы · всего <b>${dur(now - planned)}</b>`);
+  else L.push(`⏱ Не отвечает с <b>${sinceText(inc.started_at, now)}</b> МСК · уже <b>${dur(now - inc.started_at)}</b>`);
+  if (inc.ended_at && incMoved(inc)) L.push(`🔀 Прод переехал на ${esc(SERVICE.host)} — старый адрес больше не проверяю`);
   if (planned && !inc.ended_at) L.push('🔧 Плановые работы закончились, а Базис так и не поднялся');
   if (o.muteUntil && o.muteUntil > now && !inc.ended_at) L.push(`🔧 Отмечено как плановые работы до ${hhmm(o.muteUntil)} МСК — напоминания на паузе`);
   if (inc.acked_at) L.push(`🙋 В работе: <b>${esc(inc.acked_name)}</b> · с ${hhmm(inc.acked_at)}, реакция ${dur(inc.acked_at - (inc.confirmed_at || inc.started_at))}`);
@@ -294,7 +295,7 @@ async function sendRecovery(env, S, inc, c) {
   if (!place) return;
   const chat = place.chat;
   const took = dur(inc.ended_at - inc.started_at);
-  const span = `${hhmm(inc.started_at)} → ${hhmm(inc.ended_at)} МСК`;
+  const span = spanText(inc.started_at, inc.ended_at);
   if (inc.kind === 'planned') {
     await sendInc(env, S, inc, place, `🔧✅ <b>${SERVICE.name} снова отвечает</b>\nПростой во время плановых работ: ${took} · ${span}. В доступность не входит.`, { disable_notification: true, ...replyTo(inc.msg_id) });
     return;
@@ -315,9 +316,11 @@ async function sendRecovery(env, S, inc, c) {
 }
 
 // Текст «снова работает» (без просьбы о разборе). Нужен и потом — дописать разбор, когда его пришлют.
+// Падение, закрытое при переезде прода, — своим текстом (movedText)
 function recoveryText(S, inc) {
+  if (incMoved(inc)) return movedText(S, inc);
   const took = dur(inc.ended_at - inc.started_at);
-  const span = `${hhmm(inc.started_at)} → ${hhmm(inc.ended_at)} МСК`;
+  const span = spanText(inc.started_at, inc.ended_at);
   const drill = inc.kind === 'drill';
   const who = inc.acked_at
     ? `🙋 Кто разбирался: <b>${esc(inc.acked_name)}</b>, реакция ${dur(inc.acked_at - (inc.confirmed_at || inc.started_at))}`
@@ -333,6 +336,52 @@ function recoveryText(S, inc) {
   if (inc.pm_text) L.push(`📝 <b>Разбор:</b> ${esc(inc.pm_text)}${inc.pm_by ? ` — ${esc(inc.pm_by)}` : ''}`);
   return L.join('\n');
 }
+
+// ─── переезд прода (1.5.0) ──────────────────────────────────────────────────
+// Сообщение в тему тревог: что теперь проверяем, и — если падение старого адреса было открыто — что оно закрыто.
+// Ответ на него, как на «снова работает», — разбор падения (onPostmortemReply)
+
+const incMoved = (inc) => /(?:^|\s)moved:\S+/.test(String((inc && inc.note) || ''));
+// Адрес, к которому относится падение: у закрытого при переезде — старый
+const incHost = (inc) => (String((inc && inc.note) || '').match(/(?:^|\s)moved:(\S+)/) || [])[1] || SERVICE.host;
+
+function movedText(S, inc) {
+  const from = inc ? incHost(inc) : MOVED_FROM[0];
+  const L = [
+    '🔀 <b>Мониторинг переехал на новый адрес прода</b>',
+    `Теперь проверяю <b>${esc(SERVICE.host)}</b> — страницу входа и API, ${everyText(S)}. Старый адрес ${esc(from)} больше не проверяю.`,
+  ];
+  if (inc) {
+    L.push(`Падение старого адреса закрыл на момент переезда: не отвечал <b>${dur(inc.ended_at - inc.started_at)}</b> · ${spanText(inc.started_at, inc.ended_at)}.`);
+    if (inc.acked_at) L.push(`🙋 Кто разбирался: <b>${esc(inc.acked_name)}</b>`);
+    if (inc.pm_text) L.push(`📝 <b>Разбор:</b> ${esc(inc.pm_text)}${inc.pm_by ? ` — ${esc(inc.pm_by)}` : ''}`);
+  }
+  return L.join('\n');
+}
+
+async function sendMoved(env, S, inc, now) {
+  const place = inc ? await incPlace(env, S, inc) : await alertPlace(env, S);
+  if (!place) return;
+  // разбор падения старого адреса — как после «снова работает», если его ещё не написали
+  const ask = inc && !inc.pm_text && Number(place.chat) < 0 ? await pmAsk(env, inc) : null;
+  const m = await sendInc(env, S, inc || {}, place, movedText(S, inc) + (ask ? '\n\n' + ask.text : ''), {
+    ...(inc ? replyTo(inc.msg_id) : {}),
+    ...(ask && ask.markup ? { reply_markup: ask.markup } : {}),
+  });
+  if (inc && ask && m.ok) await updateIncident(env, inc, { pm_msg: m.result.message_id });
+  if (inc && inc.msg_id) {
+    await refreshCard(env, S, inc, now);
+    await tg(env, 'unpinChatMessage', { chat_id: inc.chat_id, message_id: inc.msg_id });
+  }
+  if (inc) await dmSubscribers(env, S, place.chat, () => ({ text: `🔀 Прод переехал на <b>${esc(SERVICE.host)}</b>. Падение старого адреса ${esc(incHost(inc))} закрыто: не отвечал ${dur(inc.ended_at - inc.started_at)}.` }));
+}
+
+// «04:10 → 06:35 МСК» или, если падение длиннее суток, «2 октября 04:10 → 19 октября 14:35 МСК»
+function spanText(a, b) {
+  return mskDay(a) === mskDay(b) ? `${hhmm(a)} → ${hhmm(b)} МСК` : `${dayMonth(a)} ${hhmm(a)} → ${dayMonth(b)} ${hhmm(b)} МСК`;
+}
+// «04:10» или, если не сегодня, «2 октября 04:10»
+const sinceText = (a, now) => (mskDay(a) === mskDay(now) ? hhmm(a) : `${dayMonth(a)} ${hhmm(a)}`);
 
 // Кого просим о разборе: того, кто взял тревогу (Telegram сам откроет ему ответ), иначе — всех
 async function pmAsk(env, inc) {

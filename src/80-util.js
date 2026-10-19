@@ -173,7 +173,7 @@ const fmtDateTime = (ts) => {
 export const __test = {
   streaks, snapshot, parseMute, dur, sec, pctText, plural, hhmm, mskDayStart, mskWeekday, alignMsk, quantile, aggregateRows,
   renderAlert, alertKb, guideLines, httpErr, netError, pageHint, parseCommand, verifyInitData, makeToken, verifyToken, keys,
-  remindEvery, getTargets, settingsView,
+  remindEvery, getTargets, settingsView, movedUrl, movedText, spanText, incHost,
   resetSchemaFlag: () => {
     schemaReady = false;
   },

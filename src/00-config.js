@@ -1,5 +1,6 @@
 /**
- * «Базис · мониторинг» — алертный Telegram-бот и дашборд доступности прода Базиса (etalon.iflat.io).
+ * «Базис · мониторинг» — алертный Telegram-бот и дашборд доступности прода Базиса (sk.etalongroup.com;
+ * до октября 2026 года — etalon.iflat.io).
  * Cloudflare Worker + D1 + Cron Trigger раз в минуту (прод проверяется раз в 5 минут, при сбое — каждую минуту).
  * Один файл, без зависимостей.
  *
@@ -24,7 +25,7 @@
  *   50 бот · 60 статистика и дашборд · 70 доступ · 80 мелочи
  */
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 
 // Страница дашборда, иконка и шрифт вшиваются сборкой (build.mjs → dist/worker.js)
 const APP_HTML = '__APP_HTML__';
@@ -37,16 +38,22 @@ const SERVICE = {
   name: 'Базис', // кто? — «Базис не отвечает»
   gen: 'Базиса', // кого? чего? — «мониторинг Базиса»
   dat: 'Базису', // кому? по чему? — «тревоги по Базису»
-  host: 'etalon.iflat.io',
-  openUrl: 'https://etalon.iflat.io/panel',
+  host: 'sk.etalongroup.com',
+  openUrl: 'https://sk.etalongroup.com/panel',
 };
 
+// Прод переехал (1.5.0): в октябре 2026 года дата-центр Яндекса в Сасово, где стоял облачный прод etalon.iflat.io,
+// потерян; Базис восстановлен на сервере Эталона sk.etalongroup.com. Адреса старого прода в своём списке проверок
+// бот один раз переводит на новый, открытое падение старого адреса закрывает (30-checks.js, hostMove)
+const MOVED_FROM = ['etalon.iflat.io'];
+
 // Проверки по умолчанию. Владелец меняет список командами /targets, /target_add, /target_del.
-// Сверено на проде 25.09.2026: /login без входа отдаёт 200 и разметку приложения за ~0,23 с,
+// Сверено на старом проде 25.09.2026: /login без входа отдаёт 200 и разметку приложения за ~0,23 с,
 // API без входа отдаёт 401 {"message":"Unauthenticated."} за ~0,23 с — это и есть «живой».
+// Новый прод — та же коробка Базиса, проверки те же; id не меняются, поэтому графики и доступность идут без разрыва.
 const DEFAULT_TARGETS = [
-  { id: 'web', name: 'Сайт', url: 'https://etalon.iflat.io/login', expect: [200], kind: 'html', marker: 'id="app"' },
-  { id: 'api', name: 'API', url: 'https://etalon.iflat.io/api/v1/houses?perPage=1', expect: [200, 401], kind: 'json' },
+  { id: 'web', name: 'Сайт', url: 'https://sk.etalongroup.com/login', expect: [200], kind: 'html', marker: 'id="app"' },
+  { id: 'api', name: 'API', url: 'https://sk.etalongroup.com/api/v1/houses?perPage=1', expect: [200, 401], kind: 'json' },
 ];
 
 // Если не отвечает и Базис, и контрольный адрес — проблема в сети самого монитора (Cloudflare),

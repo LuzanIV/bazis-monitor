@@ -141,6 +141,7 @@ async function tick(env, scheduled, opts = {}) {
   const now = nowS();
   const ts = Math.floor(Number(scheduled) / 60000) * 60;
   await safely('mute', () => muteExpiry(env, S, now));
+  await safely('move', () => hostMove(env, S, now));
   const targets = getTargets(S);
   const muted = int(S.mute_until, 0) > now;
   const real = checkDue(S, ts, targets, !!(await openIncident(env)), !!opts.manual);
@@ -195,6 +196,49 @@ async function tick(env, scheduled, opts = {}) {
   await safely('daily', () => dailyIfDue(env, S, now));
   await safely('net', () => netWatch(env, S, c));
   return { ts, svc, real, results: res, control, event: event && event.type };
+}
+
+// ─── переезд прода на новый адрес (1.5.0) ───────────────────────────────────
+// Один раз после выкладки версии с новым адресом (настройка host_moved — на какой адрес уже переехали):
+//   • свой список проверок (/target_add): адреса старого прода переводим на новый — путь, коды и названия те же;
+//     чужие адреса (например, тестовый iflat.io) не трогаем;
+//   • открытое падение старого адреса закрываем на момент переезда — история (журнал, статистика) остаётся,
+//     карточку открепляем; в тему тревог — одно сообщение «переехал, проверяю новый адрес» вместо «снова работает»,
+//     с просьбой о разборе, если его ещё нет;
+//   • первая проверка нового адреса — сразу, не дожидаясь пятиминутной сетки.
+// На новой установке (бот ещё ничего не проверял) — только отметка, без сообщений.
+async function hostMove(env, S, now) {
+  if (S.host_moved === SERVICE.host) return null;
+  // отметку ставим одним запросом и переезжаем, только если её поставил этот прогон: два прогона подряд
+  // (Cron и ручной /debug/tick) не пришлют сообщение дважды
+  const claim = await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('host_moved', ?1) ON CONFLICT(key) DO UPDATE SET value = ?1 WHERE settings.value IS NOT ?1")
+    .bind(SERVICE.host).run();
+  S.host_moved = SERVICE.host;
+  if (!claim || !claim.meta || !claim.meta.changes) return null;
+  const upgrade = !!int(S.last_check, 0);
+  const upd = { last_check: null };
+  const custom = safeJson(S.targets);
+  if (Array.isArray(custom) && custom.some((t) => movedUrl(t.url) !== t.url)) upd.targets = JSON.stringify(custom.map((t) => ({ ...t, url: movedUrl(t.url) })));
+  // падение, открытое до переезда, — по старому адресу
+  const inc = upgrade ? await openIncident(env) : null;
+  if (inc) await updateIncident(env, inc, { ended_at: Math.max(now, Number(inc.started_at) + 60), note: [inc.note, `moved:${MOVED_FROM[0]}`].filter(Boolean).join(' ') });
+  await saveSettings(env, S, upd);
+  if (!upgrade) return null;
+  await sendMoved(env, S, inc, now);
+  return inc;
+}
+
+// Адрес старого прода → тот же адрес на новом; остальные — как есть
+function movedUrl(url) {
+  let u;
+  try {
+    u = new URL(String(url));
+  } catch {
+    return url;
+  }
+  if (!MOVED_FROM.includes(u.hostname)) return url;
+  u.hostname = SERVICE.host;
+  return u.toString();
 }
 
 async function safely(name, fn) {
