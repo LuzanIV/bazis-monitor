@@ -1,6 +1,6 @@
 # bazis-monitor — бот «Мониторинг» и дашборд доступности Базиса
 
-Алертный Telegram-бот и дашборд в духе Grafana для прода Базиса `sk.etalongroup.com` (до октября 2026 года — `etalon.iflat.io`, с версии 1.5.0 бот следит за новым адресом). Работает на Cloudflare: Worker `bazis-monitor`, база D1 и Cron раз в минуту.
+Алертный Telegram-бот и дашборд в духе Grafana для прода Базиса `sk.etalongroup.com`. Работает на Cloudflare: Worker `bazis-monitor`, база D1 и Cron раз в минуту.
 
 - **Проверки.** Раз в 5 минут бот проверяет сайт (`/login`) и API (`/api/v1/houses`). При сбое — каждую минуту.
 - **Тревога.** Когда прод падает, бот пишет в тему «СЕРВИС НЕ ДОСТУПЕН» чата разработчиков и упоминает дежурных. Напоминает, пока кто-то не нажмёт «🙋 Беру».
@@ -32,7 +32,7 @@
 | `app/icon.png` | Иконка дашборда. Делается скриптом `art/make-art.mjs`. |
 | `app/card-font.json` | Атлас глифов Manrope для картинки «итоги недели». Собирается `npm run card-font`, вшивается сборкой. |
 | `build.mjs` | Сборка: склеивает `src/*.js` по порядку, вшивает страницу, шрифт, иконку и атлас → `dist/worker.js`. |
-| `test/run.mjs` | 32 сценария на Node. D1 заменён на `node:sqlite`; Telegram, прод и часы — подделки. |
+| `test/run.mjs` | 31 сценарий на Node. D1 заменён на `node:sqlite`; Telegram, прод и часы — подделки. |
 | `test/workerd.mjs` | Прогон в рантайме Cloudflare (Miniflare): модуль, миграция D1, Cron, вебхук, тема, тревога, дашборд, итоги недели картинкой. |
 | `test/preview.mjs` | Скриншоты дашборда в Chromium на данных за 90 дней → `test/shots/`. |
 | `test/card.mjs` | Пример карточки «итоги недели» → `test/shots/week-card*.png`. |
@@ -56,7 +56,7 @@ npx playwright install chromium       # браузер для скриншото
 
 ```sh
 npm run build          # → dist/worker.js, один файл для Cloudflare
-npm test               # сборка + 32 сценария
+npm test               # сборка + 31 сценарий
 npm run test:workerd   # сборка + прогон в рантайме Cloudflare
 npm run preview        # сборка + скриншоты дашборда в test/shots/
 npm run card           # пример карточки «итоги недели» → test/shots/week-card*.png
