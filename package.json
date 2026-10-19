@@ -1,8 +1,8 @@
 {
   "name": "bazis-monitor",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
-  "description": "«Мониторинг» — алертный Telegram-бот и дашборд доступности прода Базиса (etalon.iflat.io). Cloudflare Worker + D1 + Cron.",
+  "description": "«Мониторинг» — алертный Telegram-бот и дашборд доступности прода Базиса (sk.etalongroup.com). Cloudflare Worker + D1 + Cron.",
   "type": "module",
   "engines": {
     "node": ">=22.13"
