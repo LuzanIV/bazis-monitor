@@ -636,7 +636,7 @@ async function onTargetAdd(ctx, arg) {
   const { env, S, chatId } = ctx;
   if (!ctx.isOwner) return say(ctx, '🔒 Только владелец.');
   const m = String(arg || '').match(/^(.*?)\s*(https?:\/\/\S+)\s*([\d\s,/]*)$/i);
-  if (!m) return say(ctx, 'Формат: /target_add Название https://адрес [коды]\nНапример: /target_add Тест https://example.com/login 200');
+  if (!m) return say(ctx, 'Формат: /target_add Название https://адрес [коды]\nНапример: /target_add Тест https://iflat.io/login 200');
   const targets = getTargets(S).map((t) => ({ ...t }));
   if (targets.length >= MAX_TARGETS) return say(ctx, `Больше ${MAX_TARGETS} проверок не держу — бесплатный тариф Cloudflare.`);
   const url = m[2];
